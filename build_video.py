@@ -201,8 +201,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Arabic,Scheherazade New,72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,1,8,40,40,60,1
-Style: English,Calibri,42,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,60,1
+Style: Arabic,Noto Naskh Arabic,78,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,2,0,1,4,2,8,60,60,80,1
+Style: English,Noto Sans,44,&H00FFFAF0,&H000000FF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,60,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -262,12 +262,15 @@ def build_video(bg_video_path, audio_path, subtitle_path, out_path, total_durati
     - Scale/crop to 9:16 (1080x1920)
     - Burn subtitles
     - Overlay audio (no re-encode of audio)
-    - Video quality lowered for file size (CRF 28) but no audio quality drop
+    - CRF 18 = high quality video
     """
+    # Escape subtitle path for FFmpeg filter (colons and backslashes must be escaped)
+    sub_path_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
+
     vf = (
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        f"ass='{subtitle_path}'"
+        f"ass={sub_path_escaped}"
     )
 
     subprocess.run([
@@ -278,9 +281,11 @@ def build_video(bg_video_path, audio_path, subtitle_path, out_path, total_durati
         "-t", str(total_duration),
         "-vf", vf,
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "28",                # lower quality = smaller file; audio untouched
-        "-c:a", "copy",             # audio: no re-encode, copy as-is
+        "-preset", "slow",           # slow preset = better compression at same quality
+        "-crf", "18",                # CRF 18 = high quality (lower = better, 18 is near lossless)
+        "-pix_fmt", "yuv420p",       # required for compatibility with all players/platforms
+        "-c:a", "copy",              # audio: no re-encode, copy as-is
+        "-movflags", "+faststart",   # web optimized: metadata at start of file
         "-shortest",
         str(out_path)
     ], check=True)
