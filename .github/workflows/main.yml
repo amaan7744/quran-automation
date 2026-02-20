@@ -1,0 +1,64 @@
+name: Quran Daily Upload
+
+on:
+  schedule:
+    # 3 times a day at peak global audience times (UTC):
+    # 05:00 UTC  → Morning in Middle East/South Asia (8–9am local)
+    # 13:00 UTC  → Afternoon Europe/Middle East (3–4pm local) + morning Americas
+    # 19:00 UTC  → Evening Americas (3–4pm EST), night Middle East
+    - cron: "0 5 * * *"
+    - cron: "0 13 * * *"
+    - cron: "0 19 * * *"
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout code + progress file ────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      # ── Install system deps ───────────────────────────────────────────────────
+      - name: Install FFmpeg and fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-arabeyes fonts-noto-core fonts-noto-extra
+
+      # ── Set up Python ─────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install requests
+
+      # ── Build video ───────────────────────────────────────────────────────────
+      - name: Build Quran video
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python build_video.py
+
+      # ── Upload to platforms ───────────────────────────────────────────────────
+      - name: Upload to YouTube, Facebook, Instagram
+        env:
+          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          META_ACCESS_TOKEN:     ${{ secrets.META_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID:      ${{ secrets.FACEBOOK_PAGE_ID }}
+          INSTAGRAM_ACCOUNT_ID:  ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+        run: python upload.py
+
+      # ── Commit updated progress.json back to repo ─────────────────────────────
+      - name: Save progress back to repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add progress.json
+          git diff --staged --quiet || git commit -m "chore: update Quran progress [skip ci]"
+          git push
