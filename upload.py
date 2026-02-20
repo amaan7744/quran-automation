@@ -102,6 +102,7 @@ def upload_youtube(video_path, title, description):
 def upload_facebook(video_path, title, description):
     """
     Upload as Facebook Reel using the Resumable Upload flow.
+    Requires Meta App Review approval for pages_manage_posts permission.
     Docs: https://developers.facebook.com/docs/video-api/guides/reels-publishing
     """
     print("\n── Uploading to Facebook Reels ──")
@@ -109,12 +110,22 @@ def upload_facebook(video_path, title, description):
 
     # Step 1: Initialize upload session
     init_r = requests.post(
-        f"https://graph.facebook.com/v19.0/{FACEBOOK_PAGE_ID}/video_reels",
+        f"https://graph.facebook.com/v20.0/{FACEBOOK_PAGE_ID}/video_reels",
         params={
             "upload_phase": "start",
             "access_token": META_ACCESS_TOKEN,
         }
     )
+    if init_r.status_code == 400:
+        err = init_r.json().get("error", {})
+        code = err.get("code")
+        msg  = err.get("message", "")
+        # Code 10 or 200 = permissions not approved via App Review
+        if code in (10, 200) or "permissions" in msg.lower() or "review" in msg.lower():
+            print("  ⚠️  Facebook upload skipped: App Review not completed yet.")
+            print("     Submit your app for Meta App Review to enable Facebook Reels posting.")
+            print(f"     Meta error: {msg}")
+            return None
     init_r.raise_for_status()
     video_id    = init_r.json()["video_id"]
     upload_url  = init_r.json()["upload_url"]
@@ -125,10 +136,10 @@ def upload_facebook(video_path, title, description):
         upload_r = requests.post(
             upload_url,
             headers={
-                "Authorization":        f"OAuth {META_ACCESS_TOKEN}",
-                "offset":               "0",
-                "file_size":            str(file_size),
-                "Content-Type":         "application/octet-stream",
+                "Authorization":  f"OAuth {META_ACCESS_TOKEN}",
+                "offset":         "0",
+                "file_size":      str(file_size),
+                "Content-Type":   "application/octet-stream",
             },
             data=f,
             timeout=300,
@@ -138,14 +149,14 @@ def upload_facebook(video_path, title, description):
 
     # Step 3: Publish
     pub_r = requests.post(
-        f"https://graph.facebook.com/v19.0/{FACEBOOK_PAGE_ID}/video_reels",
+        f"https://graph.facebook.com/v20.0/{FACEBOOK_PAGE_ID}/video_reels",
         params={
-            "access_token":  META_ACCESS_TOKEN,
-            "video_id":      video_id,
-            "upload_phase":  "finish",
-            "video_state":   "PUBLISHED",
-            "description":   description[:2200],
-            "title":         title[:255],
+            "access_token": META_ACCESS_TOKEN,
+            "video_id":     video_id,
+            "upload_phase": "finish",
+            "video_state":  "PUBLISHED",
+            "description":  description[:2200],
+            "title":        title[:255],
         }
     )
     pub_r.raise_for_status()
@@ -156,29 +167,14 @@ def upload_facebook(video_path, title, description):
 # ─── INSTAGRAM ────────────────────────────────────────────────────────────────
 def upload_instagram(video_path, title, description):
     """
-    Upload as Instagram Reel.
-    Instagram requires the video to be publicly accessible via URL.
-    We use the Graph API resumable upload to get a hosted video URL first,
-    then create the media container and publish.
+    Upload as Instagram Reel via resumable upload (Graph API v20+).
+    Requires Meta App Review approval for instagram_content_publish permission.
     """
     print("\n── Uploading to Instagram Reels ──")
 
-    # Step 1: Create upload session on Instagram
-    session_r = requests.post(
-        f"https://graph.facebook.com/v19.0/{INSTAGRAM_ACCOUNT_ID}/media",
-        params={
-            "media_type":   "REELS",
-            "caption":      description[:2200],
-            "access_token": META_ACCESS_TOKEN,
-        }
-    )
-    # Instagram Reels need a video_url (publicly hosted).
-    # For the GitHub Actions flow we upload to Facebook first then link,
-    # OR use the upload_url approach introduced in Graph API v17+.
-
     # Use the /media endpoint with upload_type=resumable
     init_r = requests.post(
-        f"https://graph.facebook.com/v19.0/{INSTAGRAM_ACCOUNT_ID}/media",
+        f"https://graph.facebook.com/v20.0/{INSTAGRAM_ACCOUNT_ID}/media",
         params={
             "media_type":   "REELS",
             "upload_type":  "resumable",
@@ -186,6 +182,15 @@ def upload_instagram(video_path, title, description):
             "access_token": META_ACCESS_TOKEN,
         }
     )
+    if init_r.status_code == 400:
+        err = init_r.json().get("error", {})
+        code = err.get("code")
+        msg  = err.get("message", "")
+        if code in (10, 200) or "permissions" in msg.lower() or "review" in msg.lower():
+            print("  ⚠️  Instagram upload skipped: App Review not completed yet.")
+            print("     Submit your app for Meta App Review to enable Instagram Reels posting.")
+            print(f"     Meta error: {msg}")
+            return None
     init_r.raise_for_status()
     ig_container_id = init_r.json().get("id")
     upload_url      = init_r.json().get("uri")  # resumable upload URI
@@ -284,10 +289,16 @@ def main():
         print("Instagram credentials not set, skipping.")
 
     if errors:
-        print("\nSome uploads failed:")
+        print("\nSome uploads had issues:")
         for e in errors:
             print(f"  - {e}")
-        sys.exit(1)
+        # Only exit with error if YouTube failed
+        # Meta failures are non-fatal (may need App Review)
+        if any("YouTube" in e for e in errors):
+            sys.exit(1)
+        else:
+            print("\nNote: Meta (Facebook/Instagram) uploads need App Review approval.")
+            print("YouTube upload succeeded. Workflow marked as success.")
     else:
         print("\nAll uploads completed successfully.")
 
