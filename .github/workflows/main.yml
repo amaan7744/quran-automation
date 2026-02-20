@@ -23,10 +23,18 @@ jobs:
           token: ${{ secrets.GH_PAT }}
 
       # ── Install system deps ───────────────────────────────────────────────────
-      - name: Install FFmpeg and fonts
+      - name: Install FFmpeg and Arabic fonts
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-arabeyes fonts-noto-core fonts-noto-extra
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-noto-core \
+            fonts-noto-extra \
+            fonts-noto-color-emoji \
+            fonts-noto-cjk \
+            fonts-arabeyes \
+            libass9
+          fc-cache -fv
 
       # ── Set up Python ─────────────────────────────────────────────────────────
       - name: Set up Python
