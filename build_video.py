@@ -1,184 +1,207 @@
 #!/usr/bin/env python3
 """
-Quran Recitation Video Builder
-- Fetches audio from everyayah.com
-- Fetches nature background video from Pexels API
-- Burns Arabic + English subtitles (from local JSON files)
-- Outputs 9:16 vertical video for Reels / Shorts
-- Tracks progress in progress.json so no ayah is repeated
+build_video.py
+Single file that does the full pipeline:
+  1. Read progress.json to find next batch of ayahs
+  2. Download ayah audio from everyayah.com
+  3. Concatenate audio (no re-encode)
+  4. Build Arabic + English ASS subtitle file
+  5. Fetch nature background video from Pexels
+  6. Merge everything into a 2K 9:16 MP4
+  7. Save video_metadata.json for upload.py
+  8. Save progress.json (only after full success — no repeat, no skip)
 """
 
-import os
-import sys
 import json
-import math
-import textwrap
-import requests
+import os
+import random
 import subprocess
 import tempfile
+import textwrap
+import requests
 from pathlib import Path
 
 from surah_data import SURAHS
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
-RECITER_FOLDER   = "Saood_ash-Shuraym_128kbps"   # everyayah folder name
-RECITER_NAME     = "Saad Al-Ghamdi"               # human-readable name for description
-AYAH_PER_VIDEO   = 7                              # default batch size
-MAX_AYAH         = 10                             # max batch before forcing a split
-SMALL_SURAH_MAX  = 10                             # surahs with ≤ this many ayahs → one video
+RECITER_FOLDER  = "Saood_ash-Shuraym_128kbps"
+RECITER_NAME    = "Saad Al-Ghamdi"
+EVERYAYAH_BASE  = "https://everyayah.com/data"
 
-PEXELS_API_KEY   = os.environ["PEXELS_API_KEY"]
-PROGRESS_FILE    = Path("progress.json")
-ARABIC_JSON      = Path("arabic.json")            # tanzil format
-ENGLISH_JSON     = Path("english.json")           # saheeh international
+AYAH_PER_VIDEO  = 7     # ayahs per video for large surahs
+SMALL_SURAH_MAX = 10    # surahs with <= this many ayahs done in one video
 
-VIDEO_WIDTH      = 1080
-VIDEO_HEIGHT     = 1920
+# 2K vertical resolution for Reels / Shorts (1440x2560 = QHD 9:16)
+VIDEO_WIDTH     = 1440
+VIDEO_HEIGHT    = 2560
 
-EVERYAYAH_BASE   = "https://everyayah.com/data"
+PEXELS_API_KEY  = os.environ["PEXELS_API_KEY"]
+
+PROGRESS_FILE   = Path("progress.json")
+ARABIC_JSON     = Path("arabic.json")
+ENGLISH_JSON    = Path("english.json")
+OUTPUT_VIDEO    = Path("output_video.mp4")
+METADATA_FILE   = Path("video_metadata.json")
+
+NATURE_QUERIES  = [
+    "nature landscape",
+    "forest river",
+    "ocean waves",
+    "mountain sunrise",
+    "waterfall nature",
+    "green forest",
+    "desert sunset",
+    "rain forest",
+    "lake reflection",
+    "snow mountain",
+    "flowing river",
+    "clouds sky nature",
+    "autumn forest",
+    "tropical beach",
+    "misty mountains",
+]
 # ───────────────────────────────────────────────────────────────────────────────
 
 
-def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+# ══════════════════════════════════════════════════════════════════════════════
+# PROGRESS
+# ══════════════════════════════════════════════════════════════════════════════
 
-
-def load_progress():
+def load_progress() -> dict:
     if PROGRESS_FILE.exists():
         with open(PROGRESS_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+        data.pop("note", None)   # remove legacy note field if present
+        return data
     return {"last_surah": 1, "last_ayah": 0}
 
 
-def save_progress(surah, ayah):
-    data = {"last_surah": surah, "last_ayah": ayah}
+def save_progress(surah: int, ayah: int) -> None:
     with open(PROGRESS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump({"last_surah": surah, "last_ayah": ayah}, f, indent=2)
+    print(f"  Progress saved -> Surah {surah}, Ayah {ayah}")
 
 
-def next_batch():
+# ══════════════════════════════════════════════════════════════════════════════
+# BATCH LOGIC
+# ══════════════════════════════════════════════════════════════════════════════
+
+def next_batch() -> tuple:
     """
-    Returns list of (surah_num, ayah_num) for the next video batch.
-    Respects small-surah rule and AYAH_PER_VIDEO cap.
-    """
-    progress = load_progress()
-    start_surah = progress["last_surah"]
-    start_ayah  = progress["last_ayah"]
+    Determine the exact next set of ayahs to process.
+    Never repeats. Never skips. Moves to next surah automatically.
 
-    # Find surah entry
+    Returns:
+        batch         -- list of (surah_num, ayah_num) in strict order
+        surah_name_en -- English surah name
+        surah_name_ar -- Arabic surah name
+    """
+    progress  = load_progress()
+    cur_surah = progress["last_surah"]
+    cur_ayah  = progress["last_ayah"]
+
     surah_map = {s[0]: s for s in SURAHS}
-    if start_surah not in surah_map:
-        print("All surahs completed. Starting over from Surah 1.")
-        start_surah, start_ayah = 1, 0
 
-    s_num, s_name_en, s_name_ar, total_ayah = surah_map[start_surah]
+    # Get current surah info
+    s_num, s_name_en, s_name_ar, total_ayah = surah_map[cur_surah]
 
-    # Move to next ayah from last completed
-    next_ayah = start_ayah + 1
+    # Next ayah to process
+    next_ayah = cur_ayah + 1
 
-    # If we finished this surah, move to next
+    # If current surah is fully done, move to the next surah
     if next_ayah > total_ayah:
-        next_surah_num = start_surah + 1
+        next_surah_num = cur_surah + 1
         if next_surah_num > 114:
-            print("Quran complete. Resetting to Surah 1.")
+            print("  Entire Quran completed — restarting from Surah 1.")
             next_surah_num = 1
         s_num, s_name_en, s_name_ar, total_ayah = surah_map[next_surah_num]
         next_ayah = 1
+        print(f"  Surah {cur_surah} done. Moving to Surah {s_num} ({s_name_en}).")
 
-    s_num, s_name_en, s_name_ar, total_ayah = surah_map[s_num]
-
-    # How many ayahs remain in this surah from next_ayah
     remaining = total_ayah - next_ayah + 1
 
-    # Small surah: do all in one go
+    # Small surah: finish all remaining ayahs in one video
     if total_ayah <= SMALL_SURAH_MAX:
-        batch_size = total_ayah if next_ayah == 1 else remaining
+        batch_size = remaining
     else:
         batch_size = min(AYAH_PER_VIDEO, remaining)
 
     batch = [(s_num, a) for a in range(next_ayah, next_ayah + batch_size)]
+    print(f"  Batch -> Surah {s_num} ({s_name_en}), Ayahs {next_ayah}–{next_ayah + batch_size - 1}")
     return batch, s_name_en, s_name_ar
 
 
-def audio_url(surah, ayah):
+# ══════════════════════════════════════════════════════════════════════════════
+# AUDIO
+# ══════════════════════════════════════════════════════════════════════════════
+
+def audio_url(surah: int, ayah: int) -> str:
     return f"{EVERYAYAH_BASE}/{RECITER_FOLDER}/{surah:03d}{ayah:03d}.mp3"
 
 
-def download_audio(surah, ayah, dest):
+def download_ayah_audio(surah: int, ayah: int, dest: Path) -> None:
     url = audio_url(surah, ayah)
+    print(f"  Audio {surah}:{ayah} <- {url}")
     r = requests.get(url, timeout=30)
     if r.status_code != 200:
-        raise RuntimeError(f"Failed to download audio {url}: HTTP {r.status_code}")
-    with open(dest, "wb") as f:
-        f.write(r.content)
+        raise RuntimeError(f"everyayah.com returned HTTP {r.status_code} for {url}")
+    dest.write_bytes(r.content)
 
 
-def get_audio_duration(path):
+def get_duration(path: Path) -> float:
     result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True
+        ["ffprobe", "-v", "error",
+         "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1",
+         str(path)],
+        capture_output=True, text=True,
     )
     return float(result.stdout.strip())
 
 
-def fetch_nature_video(min_duration):
-    """Fetch a nature-only (no humans) video from Pexels."""
-    headers = {"Authorization": PEXELS_API_KEY}
-    # Try multiple nature queries to ensure variety
-    queries = ["nature landscape", "forest river", "ocean waves", "mountain sunrise", "waterfall nature"]
-    import random
-    query = random.choice(queries)
-
-    params = {
-        "query": query,
-        "orientation": "portrait",
-        "size": "large",
-        "per_page": 15,
-        "page": 1,
-    }
-    r = requests.get("https://api.pexels.com/videos/search", headers=headers, params=params)
-    r.raise_for_status()
-    videos = r.json().get("videos", [])
-
-    # Filter: no people in tags/user, duration >= min_duration
-    for vid in videos:
-        duration = vid.get("duration", 0)
-        if duration < min_duration:
-            continue
-        # Pick highest quality portrait file available
-        files = vid.get("video_files", [])
-        portrait_files = [f for f in files if f.get("width", 0) < f.get("height", 1)]
-        if not portrait_files:
-            portrait_files = files  # fallback to any
-        portrait_files.sort(key=lambda x: x.get("width", 0), reverse=True)
-        best = portrait_files[0]
-        return best["link"], duration
-
-    raise RuntimeError("No suitable nature video found on Pexels.")
+def download_all_audio(batch: list, tmpdir: Path) -> tuple:
+    """Download all ayahs. Returns (audio_files, durations)."""
+    audio_files     = []
+    audio_durations = []
+    for surah, ayah in batch:
+        dest = tmpdir / f"ayah_{surah:03d}_{ayah:03d}.mp3"
+        download_ayah_audio(surah, ayah, dest)
+        dur = get_duration(dest)
+        print(f"    Duration: {dur:.2f}s")
+        audio_files.append(dest)
+        audio_durations.append(dur)
+    return audio_files, audio_durations
 
 
-def download_video(url, dest):
-    r = requests.get(url, stream=True, timeout=60)
-    r.raise_for_status()
-    with open(dest, "wb") as f:
-        for chunk in r.iter_content(chunk_size=1024 * 256):
-            f.write(chunk)
+def concat_audio(audio_files: list, out_path: Path) -> None:
+    """Concatenate MP3s with no re-encode — copy stream directly."""
+    list_file = out_path.parent / "audio_list.txt"
+    with open(list_file, "w") as f:
+        for af in audio_files:
+            f.write(f"file '{af.resolve()}'\n")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+         "-i", str(list_file), "-c", "copy", str(out_path)],
+        check=True, capture_output=True,
+    )
+    print(f"  Audio concatenated -> {out_path.name}")
 
 
-def get_text(json_data, surah, ayah):
+# ══════════════════════════════════════════════════════════════════════════════
+# QURAN TEXT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_ayah_text(json_data, surah: int, ayah: int) -> str:
     """
-    Supports two JSON formats:
-    1. Flat list: [{surah: 1, ayah: 1, text: "..."}, ...]
-    2. Nested: {"1": {"1": "text"}}
+    Extract text from JSON. Handles 3 formats:
+      A. Flat list: [{"surah": 1, "ayah": 1, "text": "..."}]
+      B. Nested:    {"1": {"1": "text"}}
+      C. verse_key: [{"verse_key": "1:1", "text": "..."}]
     """
     if isinstance(json_data, list):
         for item in json_data:
             if item.get("surah") == surah and item.get("ayah") == ayah:
                 return item.get("text", "")
-        # try verse_key format
-        for item in json_data:
             if item.get("verse_key") == f"{surah}:{ayah}":
                 return item.get("text", "")
     elif isinstance(json_data, dict):
@@ -186,34 +209,47 @@ def get_text(json_data, surah, ayah):
     return ""
 
 
-def build_subtitle_ass(batch, arabic_data, english_data, audio_durations, out_path):
+# ══════════════════════════════════════════════════════════════════════════════
+# SUBTITLES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def sec_to_ass(s: float) -> str:
+    h   = int(s // 3600)
+    m   = int((s % 3600) // 60)
+    sec = s % 60
+    return f"{h}:{m:02d}:{sec:05.2f}"
+
+
+def build_subtitles(
+    batch:           list,
+    arabic_data,
+    english_data,
+    audio_durations: list,
+    out_path:        Path,
+) -> None:
     """
-    Build an ASS subtitle file with two tracks:
-    - Top: Arabic (large, right-to-left styled)
-    - Bottom: English translation (smaller)
-    Each ayah occupies its audio duration in sequence.
+    Write ASS subtitle file.
+    Arabic  -> top center, large, Noto Naskh Arabic
+    English -> bottom center, smaller, Noto Sans
+    Each ayah shown for exactly its audio duration.
     """
-    ass_header = """[Script Info]
+    # Font sizes scaled up for 2K resolution
+    header = """\
+[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: 1440
+PlayResY: 2560
 ScaledBorderAndShadow: yes
+WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Arabic,Noto Naskh Arabic,78,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,2,0,1,4,2,8,60,60,80,1
-Style: English,Noto Sans,44,&H00FFFAF0,&H000000FF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,60,1
+Style: Arabic,Noto Naskh Arabic,105,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,2,0,1,5,3,8,80,80,120,1
+Style: English,Noto Sans,58,&H00FFFAF0,&H000000FF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,1,4,2,2,80,80,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-
-    def sec_to_ass(s):
-        h = int(s // 3600)
-        m = int((s % 3600) // 60)
-        sec = s % 60
-        return f"{h}:{m:02d}:{sec:05.2f}"
-
     events = []
     cursor = 0.0
 
@@ -221,12 +257,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = sec_to_ass(cursor)
         end   = sec_to_ass(cursor + duration)
 
-        ar_text = get_text(arabic_data, surah, ayah)
-        en_text = get_text(english_data, surah, ayah)
+        ar_text = get_ayah_text(arabic_data, surah, ayah)
+        en_text = get_ayah_text(english_data, surah, ayah)
 
-        # Wrap English text (max ~45 chars per line for readability)
-        en_lines = textwrap.wrap(en_text, 45) if en_text else []
-        en_wrapped = r"\N".join(en_lines)
+        # Wrap English at 38 chars for clean mobile display at 2K
+        if en_text:
+            en_wrapped = r"\N".join(textwrap.wrap(en_text, width=38))
+        else:
+            en_wrapped = ""
 
         if ar_text:
             events.append(f"Dialogue: 0,{start},{end},Arabic,,0,0,0,,{ar_text}")
@@ -236,67 +274,131 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         cursor += duration
 
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(ass_header)
+        f.write(header)
         f.write("\n".join(events))
+        f.write("\n")
+
+    print(f"  Subtitles written -> {out_path.name}")
 
 
-def concat_audios(audio_files, out_path):
-    """Concatenate MP3 files using ffmpeg concat demuxer (no re-encode)."""
-    list_file = out_path.parent / "audio_list.txt"
-    with open(list_file, "w") as f:
-        for af in audio_files:
-            f.write(f"file '{af.resolve()}'\n")
+# ══════════════════════════════════════════════════════════════════════════════
+# PEXELS BACKGROUND
+# ══════════════════════════════════════════════════════════════════════════════
 
-    subprocess.run([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", str(list_file),
-        "-c", "copy",
-        str(out_path)
-    ], check=True, capture_output=True)
+def fetch_background(min_duration: float) -> str:
+    """Fetch a portrait nature video URL from Pexels."""
+    headers = {"Authorization": PEXELS_API_KEY}
+    query   = random.choice(NATURE_QUERIES)
+    print(f"  Pexels query: '{query}'")
+
+    r = requests.get(
+        "https://api.pexels.com/videos/search",
+        headers=headers,
+        params={"query": query, "orientation": "portrait", "size": "large", "per_page": 20},
+        timeout=30,
+    )
+    r.raise_for_status()
+    videos = r.json().get("videos", [])
+
+    if not videos:
+        raise RuntimeError(f"Pexels returned no videos for '{query}'")
+
+    # Filter by duration, prefer portrait files, pick highest resolution
+    suitable = [v for v in videos if v.get("duration", 0) >= min_duration]
+    pool     = suitable if suitable else sorted(videos, key=lambda v: v.get("duration", 0), reverse=True)
+
+    for vid in pool:
+        files    = vid.get("video_files", [])
+        portrait = [f for f in files if f.get("height", 0) > f.get("width", 1)]
+        best_set = portrait if portrait else files
+        best_set.sort(key=lambda x: x.get("width", 0) * x.get("height", 0), reverse=True)
+        url = best_set[0].get("link") if best_set else None
+        if url:
+            print(f"  Background selected ({vid.get('duration')}s): {vid.get('url')}")
+            return url
+
+    raise RuntimeError("No suitable Pexels video found.")
 
 
-def build_video(bg_video_path, audio_path, subtitle_path, out_path, total_duration):
+def download_background(url: str, dest: Path) -> None:
+    print("  Downloading background video...")
+    r = requests.get(url, stream=True, timeout=120)
+    r.raise_for_status()
+    with open(dest, "wb") as f:
+        for chunk in r.iter_content(chunk_size=512 * 1024):
+            if chunk:
+                f.write(chunk)
+    print(f"  Background saved -> {dest.name}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VIDEO MERGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def merge_video(
+    bg_path:        Path,
+    audio_path:     Path,
+    subtitle_path:  Path,
+    out_path:       Path,
+    total_duration: float,
+) -> None:
     """
-    Compose final video:
-    - Background looped/trimmed to total_duration
-    - Scale/crop to 9:16 (1080x1920)
-    - Burn subtitles
-    - Overlay audio (no re-encode of audio)
-    - CRF 18 = high quality video
+    Merge background + audio + subtitles into final 2K 9:16 video.
+    Audio is copied as-is (no quality loss).
+    Video encoded at CRF 16 (very high quality).
     """
-    # Escape subtitle path for FFmpeg filter (colons and backslashes must be escaped)
-    sub_path_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
+    # Escape path for FFmpeg ass filter on Linux
+    sub_escaped = str(subtitle_path.resolve()).replace("\\", "/").replace(":", "\\:")
 
     vf = (
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        f"ass={sub_path_escaped}"
+        f"ass={sub_escaped}"
     )
 
-    subprocess.run([
-        "ffmpeg", "-y",
-        "-stream_loop", "-1",        # loop background video if shorter than audio
-        "-i", str(bg_video_path),
-        "-i", str(audio_path),
-        "-t", str(total_duration),
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-preset", "slow",           # slow preset = better compression at same quality
-        "-crf", "18",                # CRF 18 = high quality (lower = better, 18 is near lossless)
-        "-pix_fmt", "yuv420p",       # required for compatibility with all players/platforms
-        "-c:a", "copy",              # audio: no re-encode, copy as-is
-        "-movflags", "+faststart",   # web optimized: metadata at start of file
-        "-shortest",
-        str(out_path)
-    ], check=True)
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-stream_loop", "-1",       # loop bg if shorter than audio
+            "-i", str(bg_path),
+            "-i", str(audio_path),
+            "-t", str(total_duration),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "slow",
+            "-crf", "16",               # 16 = very high quality, near-lossless visually
+            "-pix_fmt", "yuv420p",      # universal compatibility
+            "-c:a", "copy",             # audio: no re-encode
+            "-movflags", "+faststart",  # streaming optimised
+            "-shortest",
+            str(out_path),
+        ],
+        check=True,
+    )
+    print(f"  Video merged -> {out_path}")
 
 
-def generate_description(surah_name_en, surah_name_ar, surah_num, batch):
-    first_ayah = batch[0][1]
-    last_ayah  = batch[-1][1]
+# ══════════════════════════════════════════════════════════════════════════════
+# METADATA
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_title(surah_name_en: str, surah_num: int, batch: list) -> str:
+    first = batch[0][1]
+    last  = batch[-1][1]
+    return f"Quran | {surah_name_en} ({surah_num}:{first}-{last}) | {RECITER_NAME}"
+
+
+def generate_description(
+    surah_name_en: str,
+    surah_name_ar: str,
+    surah_num:     int,
+    batch:         list,
+) -> str:
+    first = batch[0][1]
+    last  = batch[-1][1]
     return (
-        f"Quran Recitation | {surah_name_ar} • {surah_name_en} (Surah {surah_num})\n"
-        f"Ayah {first_ayah}–{last_ayah}\n\n"
+        f"Quran Recitation | {surah_name_ar} - {surah_name_en} (Surah {surah_num})\n"
+        f"Ayah {first}-{last}\n\n"
         f"Recited by: {RECITER_NAME}\n"
         f"Arabic Text: Tanzil\n"
         f"English Translation: Sahih International\n\n"
@@ -304,86 +406,75 @@ def generate_description(surah_name_en, surah_name_ar, surah_num, batch):
     )
 
 
-def generate_title(surah_name_en, surah_num, batch):
-    first_ayah = batch[0][1]
-    last_ayah  = batch[-1][1]
-    return f"Quran | {surah_name_en} ({surah_num}:{first_ayah}-{last_ayah}) | {RECITER_NAME}"
-
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
+    with tempfile.TemporaryDirectory() as _tmp:
+        tmpdir = Path(_tmp)
 
+        # ── Load Quran text ───────────────────────────────────────────────────
         print("Loading Quran text data...")
-        arabic_data  = load_json(ARABIC_JSON)
-        english_data = load_json(ENGLISH_JSON)
+        with open(ARABIC_JSON, "r", encoding="utf-8") as f:
+            arabic_data = json.load(f)
+        with open(ENGLISH_JSON, "r", encoding="utf-8") as f:
+            english_data = json.load(f)
 
-        print("Determining next batch...")
+        # ── Determine next batch ──────────────────────────────────────────────
+        print("\nCalculating next batch...")
         batch, surah_name_en, surah_name_ar = next_batch()
         surah_num = batch[0][0]
-        print(f"  Batch: Surah {surah_num} ({surah_name_en}), Ayahs {batch[0][1]}–{batch[-1][1]}")
 
-        # ── Download audio files ──────────────────────────────────────────────
-        print("Downloading audio files...")
-        audio_files    = []
-        audio_durations = []
-        for surah, ayah in batch:
-            dest = tmpdir / f"ayah_{surah:03d}_{ayah:03d}.mp3"
-            print(f"  Downloading {surah}:{ayah} from everyayah.com ...")
-            download_audio(surah, ayah, dest)
-            dur = get_audio_duration(dest)
-            audio_files.append(dest)
-            audio_durations.append(dur)
-            print(f"    Duration: {dur:.2f}s")
-
+        # ── Download audio ────────────────────────────────────────────────────
+        print("\nDownloading ayah audio...")
+        audio_files, audio_durations = download_all_audio(batch, tmpdir)
         total_duration = sum(audio_durations)
-        print(f"  Total audio duration: {total_duration:.2f}s")
+        print(f"  Total duration: {total_duration:.2f}s")
 
         # ── Concatenate audio ─────────────────────────────────────────────────
+        print("\nConcatenating audio (no re-encode)...")
         combined_audio = tmpdir / "combined_audio.mp3"
-        print("Concatenating audio (no re-encode)...")
-        concat_audios(audio_files, combined_audio)
+        concat_audio(audio_files, combined_audio)
 
         # ── Build subtitles ───────────────────────────────────────────────────
+        print("\nBuilding subtitles...")
         subtitle_file = tmpdir / "subtitles.ass"
-        print("Building subtitles...")
-        build_subtitle_ass(batch, arabic_data, english_data, audio_durations, subtitle_file)
+        build_subtitles(batch, arabic_data, english_data, audio_durations, subtitle_file)
 
-        # ── Fetch Pexels background ───────────────────────────────────────────
-        print("Fetching nature background video from Pexels...")
-        bg_url, bg_duration = fetch_nature_video(min_duration=max(10, total_duration))
+        # ── Fetch background ──────────────────────────────────────────────────
+        print("\nFetching Pexels nature background...")
+        bg_url  = fetch_background(min_duration=max(10, total_duration))
         bg_path = tmpdir / "background.mp4"
-        print(f"  Downloading background ({bg_duration}s)...")
-        download_video(bg_url, bg_path)
+        download_background(bg_url, bg_path)
 
-        # ── Build final video ─────────────────────────────────────────────────
-        output_file = Path("output_video.mp4")
-        print("Building final video...")
-        build_video(bg_path, combined_audio, subtitle_file, output_file, total_duration)
-        print(f"  Video saved: {output_file}")
+        # ── Merge final video ─────────────────────────────────────────────────
+        print("\nMerging final video (2K quality)...")
+        merge_video(bg_path, combined_audio, subtitle_file, OUTPUT_VIDEO, total_duration)
 
-        # ── Generate metadata ─────────────────────────────────────────────────
+        # ── Save metadata ─────────────────────────────────────────────────────
         title       = generate_title(surah_name_en, surah_num, batch)
         description = generate_description(surah_name_en, surah_name_ar, surah_num, batch)
+        with open(METADATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "title":       title,
+                "description": description,
+                "surah_num":   surah_num,
+                "surah_en":    surah_name_en,
+                "surah_ar":    surah_name_ar,
+                "first_ayah":  batch[0][1],
+                "last_ayah":   batch[-1][1],
+                "video_file":  str(OUTPUT_VIDEO),
+            }, f, ensure_ascii=False, indent=2)
+        print(f"  Metadata saved -> {METADATA_FILE}")
 
-        metadata = {
-            "title":       title,
-            "description": description,
-            "surah_num":   surah_num,
-            "surah_en":    surah_name_en,
-            "surah_ar":    surah_name_ar,
-            "first_ayah":  batch[0][1],
-            "last_ayah":   batch[-1][1],
-            "video_file":  str(output_file),
-        }
-        with open("video_metadata.json", "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-        # ── Save progress ─────────────────────────────────────────────────────
+        # ── Save progress (LAST — only after full success) ────────────────────
+        print("\nSaving progress...")
         save_progress(surah_num, batch[-1][1])
-        print("Progress saved.")
-        print(f"\nDone! Video: {output_file}")
-        print(f"Title: {title}")
+
+        print(f"\nDone!")
+        print(f"  Video : {OUTPUT_VIDEO}")
+        print(f"  Title : {title}")
 
 
 if __name__ == "__main__":
