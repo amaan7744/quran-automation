@@ -183,3 +183,26 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def save_metadata(
+    title:         str,
+    description:   str,
+    surah_name_en: str,
+    surah_name_ar: str,
+    surah_num:     int,
+    batch:         list,
+) -> None:
+    """Save video metadata for upload.py to read."""
+    with open(METADATA_FILE, "w", encoding="utf-8") as f:
+        json.dump({
+            "title":       title,
+            "description": description,
+            "surah_num":   surah_num,
+            "surah_en":    surah_name_en,
+            "surah_ar":    surah_name_ar,
+            "first_ayah":  batch[0][1],
+            "last_ayah":   batch[-1][1],
+            "video_file":  str(OUTPUT_VIDEO),
+        }, f, ensure_ascii=False, indent=2)
+    print(f"  Metadata saved -> {METADATA_FILE}")
