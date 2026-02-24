@@ -15,7 +15,7 @@ from surah_data import SURAHS
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 RECITER_FOLDER  = "Saood_ash-Shuraym_128kbps"
-RECITER_NAME    = "Saad Al-Ghamdi"
+RECITER_NAME    = "Saud Al-Shuraim"
 EVERYAYAH_BASE  = "https://everyayah.com/data"
 AYAH_PER_VIDEO  = 7
 SMALL_SURAH_MAX = 10
