@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
 subtitle_builder.py
-Builds an ASS subtitle file with two clearly visible tracks:
-  - Arabic  : top-center, large, bold, white with strong black outline
-  - English : bottom-center, medium, white with strong black outline
-Each ayah shown for exactly its audio duration.
-Fonts scaled for 2K (1440x2560) so text is always clearly visible.
+Builds ASS subtitle file from arabic.json and english.json.
+Arabic top-center, English bottom-center.
+Both always visible with dark background box and thick outline.
 """
 
 import textwrap
@@ -14,19 +12,26 @@ from pathlib import Path
 
 def get_ayah_text(json_data, surah: int, ayah: int) -> str:
     """
-    Extract text from JSON. Supports 3 formats:
+    Extract ayah text from JSON. Supports 3 formats:
     A. Flat list : [{"surah": 1, "ayah": 1, "text": "..."}]
     B. Nested    : {"1": {"1": "text"}}
     C. verse_key : [{"verse_key": "1:1", "text": "..."}]
     """
     if isinstance(json_data, list):
         for item in json_data:
+            # Format A
             if item.get("surah") == surah and item.get("ayah") == ayah:
-                return item.get("text", "")
+                return item.get("text", "").strip()
+            # Format A with string keys
+            if str(item.get("surah")) == str(surah) and str(item.get("ayah")) == str(ayah):
+                return item.get("text", "").strip()
+            # Format C
             if item.get("verse_key") == f"{surah}:{ayah}":
-                return item.get("text", "")
+                return item.get("text", "").strip()
     elif isinstance(json_data, dict):
-        return json_data.get(str(surah), {}).get(str(ayah), "")
+        # Format B
+        val = json_data.get(str(surah), {}).get(str(ayah), "")
+        return val.strip() if val else ""
     return ""
 
 
@@ -45,18 +50,11 @@ def build_subtitles(
     out_path:        Path,
 ) -> None:
     """
-    Write ASS subtitle file.
-    Arabic  -> upper area, very large, bold, strong outline = always visible
-    English -> lower area, large, strong outline = always visible
-    Both have semi-transparent dark background box for maximum readability.
+    Write ASS subtitle file with Arabic and English text.
+    Arabic  -> top-center, 110px, bold, dark background box
+    English -> bottom-center, 62px, dark background box
     """
 
-    # PlayRes matches our 2K output (1440x2560)
-    # BorderStyle 3 = opaque box behind text for guaranteed visibility
-    # Outline 5 = thick black outline so text visible on any background
-    # Shadow 3 = drop shadow for extra depth
-    # MarginV = vertical margin from edge
-    # Alignment 8 = top-center for Arabic, 2 = bottom-center for English
     header = """\
 [Script Info]
 ScriptType: v4.00+
@@ -84,7 +82,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ar_text = get_ayah_text(arabic_data, surah, ayah)
         en_text = get_ayah_text(english_data, surah, ayah)
 
-        # English: wrap at 36 chars for clean 2-line display on mobile
+        # Debug: print what was found
+        print(f"    Ayah {surah}:{ayah} -> AR: '{ar_text[:40] if ar_text else 'NOT FOUND'}' | EN: '{en_text[:40] if en_text else 'NOT FOUND'}'")
+
+        # Wrap English at 36 chars per line
         en_wrapped = r"\N".join(textwrap.wrap(en_text, width=36)) if en_text else ""
 
         if ar_text:
@@ -94,9 +95,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         cursor += duration
 
+    print(f"  Total subtitle events: {len(events)}")
+
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(header)
         f.write("\n".join(events))
         f.write("\n")
 
-    print(f"  Subtitles written -> {out_path.name} ({len(events)} lines)")
+    print(f"  Subtitle file written -> {out_path.name}")
