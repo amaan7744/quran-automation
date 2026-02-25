@@ -5,88 +5,111 @@ on:
     - cron: "0 5 * * *"   # 05:00 UTC - Morning Middle East / South Asia
     - cron: "0 13 * * *"  # 13:00 UTC - Afternoon Europe / Middle East
     - cron: "0 19 * * *"  # 19:00 UTC - Evening Americas
-  workflow_dispatch:       # manual trigger from Actions tab
+  workflow_dispatch:
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
 
     steps:
 
-      # ── 1. Checkout repo ──────────────────────────────────────────────────
+      # ── 1. Checkout ───────────────────────────────────────────────────────
       - name: "1. Checkout repository"
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
-      # ── 2. Install FFmpeg + libass + Noto Arabic fonts ────────────────────
+      # ── 2. Install FFmpeg + fonts ─────────────────────────────────────────
       - name: "2. Install FFmpeg and Arabic fonts"
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            ffmpeg \
-            libass9 \
-            libass-dev \
-            fonts-noto \
-            fonts-noto-core \
-            fonts-noto-extra \
-            fonts-arabeyes \
-            fontconfig
+            ffmpeg libass9 libass-dev \
+            fonts-noto fonts-noto-core fonts-noto-extra \
+            fonts-arabeyes fontconfig
           fc-cache -fv
-          echo "Noto fonts available:"
-          fc-list | grep -i "noto" | head -15
+          fc-list | grep -i "noto" | head -10
 
-      # ── 3. Python 3.11 ────────────────────────────────────────────────────
+      # ── 3. Python ─────────────────────────────────────────────────────────
       - name: "3. Set up Python 3.11"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ── 4. Install Python packages ────────────────────────────────────────
       - name: "4. Install Python dependencies"
         run: pip install -r requirements.txt
 
-      # ── 5. Show next ayah batch from progress ─────────────────────────────
+      # ── 5. Show current progress + next batch ─────────────────────────────
       - name: "5. audio_downloader.py — Show next ayah batch"
         env:
-          GH_PAT:              ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY:   ${{ github.repository }}
+          GH_PAT:            ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python -c "
           from audio_downloader import get_next_batch
           batch, en, ar = get_next_batch()
-          print(f'Next: Surah {batch[0][0]} ({en}), Ayahs {batch[0][1]}-{batch[-1][1]}')
+          print(f'Next batch: Surah {batch[0][0]} ({en}), Ayahs {batch[0][1]}-{batch[-1][1]}')
           "
 
-      # ── 6. Full pipeline: audio + subtitles + pexels + 2K video ───────────
+      # ── 6. Build 2K video (audio + subtitles + pexels + merge) ────────────
       - name: "6. audio_downloader + subtitle_builder + pexels_fetcher + build_video"
         env:
-          PEXELS_API_KEY:      ${{ secrets.PEXELS_API_KEY }}
-          GH_PAT:              ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY:   ${{ github.repository }}
+          PEXELS_API_KEY:    ${{ secrets.PEXELS_API_KEY }}
+          GH_PAT:            ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python build_video.py
 
-      # ── 7. Upload to YouTube Shorts ───────────────────────────────────────
-      - name: "7. upload.py — Upload to YouTube Shorts"
+      # ── 7. Upload to all platforms ────────────────────────────────────────
+      - name: "7. upload.py — YouTube Shorts + Facebook Reels + Instagram Reels"
         env:
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          META_ACCESS_TOKEN:     ${{ secrets.META_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID:      ${{ secrets.FACEBOOK_PAGE_ID }}
+          INSTAGRAM_ACCOUNT_ID:  ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
           GH_PAT:                ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY:     ${{ github.repository }}
         run: python upload.py
 
-      # ── 8. Commit progress.json as backup (GitHub Variable is primary) ────
-      - name: "8. Commit progress.json backup to repo"
+      # ── 8. Save progress AFTER successful upload ──────────────────────────
+      # This runs ONLY if step 7 succeeded (GitHub Actions default behaviour)
+      # Writes final progress to both GitHub Variable AND commits progress.json
+      - name: "8. Save progress after successful upload"
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_PAT:            ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python -c "
+          import json
+          from audio_downloader import write_github_variable, write_file_progress
+
+          with open('video_metadata.json') as f:
+              meta = json.load(f)
+
+          surah = meta['surah_num']
+          ayah  = meta['last_ayah']
+
+          print(f'Saving progress: Surah {surah}, Ayah {ayah}')
+          write_github_variable(surah, ayah)
+          write_file_progress(surah, ayah)
+          print('Progress saved to GitHub Variable + progress.json')
+          "
+
+      # ── 9. Commit progress.json to repo ───────────────────────────────────
+      - name: "9. Commit progress.json to repo"
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
           git pull --rebase origin main
           git add progress.json
           git diff --staged --quiet \
-            && echo "No change to progress.json" \
-            || (git commit -m "chore: quran progress backup [skip ci]" && git push origin main)
-          echo "Done. Progress saved to GitHub Variable (primary) and file (backup)."
+            && echo "progress.json unchanged" \
+            || git commit -m "chore: progress Surah $(python -c "import json; d=json.load(open('progress.json')); print(d['last_surah'])") Ayah $(python -c "import json; d=json.load(open('progress.json')); print(d['last_ayah'])") [skip ci]"
+          git push origin main
+          echo "progress.json committed and pushed"
