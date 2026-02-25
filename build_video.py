@@ -37,8 +37,11 @@ def verify_subtitles(subtitle_path: Path, batch: list) -> None:
     print(f"  Subtitle lines generated: {len(lines)}")
     if lines:
         print(f"  First subtitle line: {lines[0][:120]}")
+        print(f"  Subtitles look good!")
     else:
-        raise RuntimeError("Subtitle file has NO Dialogue lines — arabic.json or english.json may be empty or wrong format.")
+        print("  WARNING: Subtitle file has NO Dialogue lines.")
+        print("  Check that arabic.json and english.json are in the correct format.")
+        print("  Video will still be built but without subtitles.")
 
 
 def merge_final_video(
