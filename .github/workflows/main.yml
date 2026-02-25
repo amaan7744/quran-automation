@@ -10,6 +10,7 @@ on:
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    # Explicitly grant write permissions to the GITHUB_TOKEN
     permissions:
       contents: write
       actions: write
@@ -29,7 +30,7 @@ jobs:
           sudo apt-get install -y \
             ffmpeg libass9 libass-dev \
             fonts-noto fonts-noto-core fonts-noto-extra \
-            fonts-arabeyes fontconfig
+            fonts-arapey fonts-arabeyes fontconfig
           fc-cache -fv
 
       # ── 3. Python ─────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ jobs:
       - name: "4. Install Python dependencies"
         run: pip install -r requirements.txt
 
-      # ── 5. Show current progress + next batch ─────────────────────────────
+      # ── 5. Show next ayah batch ─────────────────────────────
       - name: "5. Show next ayah batch"
         run: |
           python -c "
@@ -83,7 +84,7 @@ jobs:
           write_file_progress(surah, ayah)
           "
 
-      # ── 9. Push Progress to GitHub (Fixes Error 128) ──────────────────────
+      # ── 9. Push Progress to GitHub (Fixes Error 128 & Rebase Issues) ────────
       - name: "9. Commit and Push progress"
         if: success()
         run: |
@@ -91,20 +92,20 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage and Commit changes first to avoid 'unstaged changes' rebase error
+          # Stage the specific file FIRST to allow pulling
           git add progress.json
           
-          # Only proceed if the file actually changed
+          # Only proceed if changes exist
           if ! git diff --cached --quiet; then
-            git commit -m "chore: update progress [skip ci]"
+            git commit -m "chore: update progress Surah $(python -c 'import json; d=json.load(open("progress.json")); print(d["last_surah"])') Ayah $(python -c 'import json; d=json.load(open("progress.json")); print(d["last_ayah"])') [skip ci]"
             
-            # Use PAT for authenticated push
+            # Use authenticated URL for push
             git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
             
-            # Pull latest changes to sync before pushing
+            # Sync with remote before pushing to avoid conflicts
             git pull --rebase origin main
             git push origin main
-            echo "Successfully pushed progress updates."
+            echo "Progress updated and pushed."
           else
-            echo "No changes to progress.json detected."
+            echo "No changes to progress.json."
           fi
