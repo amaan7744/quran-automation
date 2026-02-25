@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Upload the built video to:
-  - YouTube Shorts (via YouTube Data API v3)
-  - Facebook Reels (via Meta Graph API)
-  - Instagram Reels (via Meta Graph API)
+upload.py
+Uploads the built video to:
+  1. YouTube Shorts  — via YouTube Data API v3
+  2. Facebook Reels  — via Meta Graph API (resumable upload)
+  3. Instagram Reels — via Meta Graph API (resumable upload)
 
-Reads video_metadata.json written by build_video.py.
-All credentials come from environment variables (GitHub Secrets).
+Credentials come from GitHub Secrets as environment variables.
 """
 
 import os
@@ -16,72 +16,104 @@ import time
 import requests
 from pathlib import Path
 
-# ─── ENV VARS (GitHub Secrets) ────────────────────────────────────────────────
-YOUTUBE_CLIENT_ID       = os.environ.get("YOUTUBE_CLIENT_ID", "")
-YOUTUBE_CLIENT_SECRET   = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
-YOUTUBE_REFRESH_TOKEN   = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+# ─── CREDENTIALS (GitHub Secrets) ────────────────────────────────────────────
+YOUTUBE_CLIENT_ID     = os.environ.get("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
 
-META_ACCESS_TOKEN       = os.environ.get("META_ACCESS_TOKEN", "")
-FACEBOOK_PAGE_ID        = os.environ.get("FACEBOOK_PAGE_ID", "")
-INSTAGRAM_ACCOUNT_ID    = os.environ.get("INSTAGRAM_ACCOUNT_ID", "")
-# ──────────────────────────────────────────────────────────────────────────────
+META_ACCESS_TOKEN     = os.environ.get("META_ACCESS_TOKEN", "")
+FACEBOOK_PAGE_ID      = os.environ.get("FACEBOOK_PAGE_ID", "")
+INSTAGRAM_ACCOUNT_ID  = os.environ.get("INSTAGRAM_ACCOUNT_ID", "")
+# ─────────────────────────────────────────────────────────────────────────────
 
 METADATA_FILE = Path("video_metadata.json")
+GRAPH_VERSION = "v20.0"
+GRAPH_BASE    = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 
-def load_metadata():
+def load_metadata() -> dict:
     if not METADATA_FILE.exists():
-        raise FileNotFoundError("video_metadata.json not found. Run build_video.py first.")
+        raise FileNotFoundError(
+            "video_metadata.json not found. Make sure build_video.py ran successfully."
+        )
     with open(METADATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-# ─── YOUTUBE ──────────────────────────────────────────────────────────────────
-def youtube_get_access_token():
-    """Exchange refresh token for a short-lived access token."""
-    r = requests.post("https://oauth2.googleapis.com/token", data={
-        "client_id":     YOUTUBE_CLIENT_ID,
-        "client_secret": YOUTUBE_CLIENT_SECRET,
-        "refresh_token": YOUTUBE_REFRESH_TOKEN,
-        "grant_type":    "refresh_token",
-    })
+def print_section(title: str) -> None:
+    print(f"\n{'─' * 50}")
+    print(f"  {title}")
+    print(f"{'─' * 50}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# YOUTUBE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def youtube_get_access_token() -> str:
+    r = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id":     YOUTUBE_CLIENT_ID,
+            "client_secret": YOUTUBE_CLIENT_SECRET,
+            "refresh_token": YOUTUBE_REFRESH_TOKEN,
+            "grant_type":    "refresh_token",
+        },
+        timeout=30,
+    )
     r.raise_for_status()
-    return r.json()["access_token"]
+    token = r.json().get("access_token")
+    if not token:
+        raise RuntimeError(f"No access token returned: {r.json()}")
+    return token
 
 
-def upload_youtube(video_path, title, description):
-    print("\n── Uploading to YouTube Shorts ──")
+def upload_youtube(video_path: str, title: str, description: str) -> str:
+    print_section("Uploading to YouTube Shorts")
+
+    file_size    = os.path.getsize(video_path)
     access_token = youtube_get_access_token()
+    print(f"  File  : {video_path} ({file_size / 1024 / 1024:.1f} MB)")
+    print(f"  Title : {title}")
 
-    # Step 1: initiate resumable upload
-    metadata = {
-        "snippet": {
-            "title":       title[:100],   # YouTube title limit
-            "description": description,
-            "tags":        ["Quran", "Islam", "Recitation", "Shorts"],
-            "categoryId":  "22",          # People & Blogs
-        },
-        "status": {
-            "privacyStatus":          "public",
-            "selfDeclaredMadeForKids": False,
-        },
-    }
-
+    # Step 1: initiate resumable upload session
     init_r = requests.post(
         "https://www.googleapis.com/upload/youtube/v3/videos"
         "?uploadType=resumable&part=snippet,status",
         headers={
-            "Authorization":  f"Bearer {access_token}",
-            "Content-Type":   "application/json; charset=UTF-8",
-            "X-Upload-Content-Type": "video/mp4",
+            "Authorization":           f"Bearer {access_token}",
+            "Content-Type":            "application/json; charset=UTF-8",
+            "X-Upload-Content-Type":   "video/mp4",
+            "X-Upload-Content-Length": str(file_size),
         },
-        json=metadata,
+        json={
+            "snippet": {
+                "title":       title[:100],
+                "description": description,
+                "tags": [
+                    "quran", "quranrecitation", "quranshorts", "islamicvideo",
+                    "shorts", "dailyquran", "islam", "qurantilawat",
+                    "saudialshuraim", "muslimshorts", "islamicshorts",
+                    "quranverses", "islamicreminder", "qurankareem", "allahuakbar",
+                ],
+                "categoryId": "29",   # Nonprofits & Activism
+            },
+            "status": {
+                "privacyStatus":           "public",
+                "selfDeclaredMadeForKids": False,
+                "madeForKids":             False,
+            },
+        },
+        timeout=30,
     )
     init_r.raise_for_status()
-    upload_url = init_r.headers["Location"]
+
+    upload_url = init_r.headers.get("Location")
+    if not upload_url:
+        raise RuntimeError("YouTube did not return a resumable upload URL.")
 
     # Step 2: upload video bytes
-    file_size = os.path.getsize(video_path)
+    print("  Uploading video bytes...")
     with open(video_path, "rb") as f:
         upload_r = requests.put(
             upload_url,
@@ -90,217 +122,266 @@ def upload_youtube(video_path, title, description):
                 "Content-Type":   "video/mp4",
             },
             data=f,
-            timeout=300,
+            timeout=600,
         )
     upload_r.raise_for_status()
+
     video_id = upload_r.json().get("id", "unknown")
-    print(f"  YouTube upload done. Video ID: {video_id}")
+    print(f"  Done!")
+    print(f"  Video ID : {video_id}")
+    print(f"  URL      : https://www.youtube.com/shorts/{video_id}")
     return video_id
 
 
-# ─── FACEBOOK ─────────────────────────────────────────────────────────────────
-def upload_facebook(video_path, title, description):
-    """
-    Upload as Facebook Reel using the Resumable Upload flow.
-    Requires Meta App Review approval for pages_manage_posts permission.
-    Docs: https://developers.facebook.com/docs/video-api/guides/reels-publishing
-    """
-    print("\n── Uploading to Facebook Reels ──")
-    file_size = os.path.getsize(video_path)
+# ══════════════════════════════════════════════════════════════════════════════
+# FACEBOOK REELS
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # Step 1: Initialize upload session
+def upload_facebook(video_path: str, title: str, description: str) -> str:
+    print_section("Uploading to Facebook Reels")
+
+    file_size = os.path.getsize(video_path)
+    print(f"  File  : {video_path} ({file_size / 1024 / 1024:.1f} MB)")
+
+    # Step 1: start upload session
+    print("  Step 1: Starting upload session...")
     init_r = requests.post(
-        f"https://graph.facebook.com/v20.0/{FACEBOOK_PAGE_ID}/video_reels",
+        f"{GRAPH_BASE}/{FACEBOOK_PAGE_ID}/video_reels",
         params={
             "upload_phase": "start",
             "access_token": META_ACCESS_TOKEN,
-        }
+        },
+        timeout=30,
     )
-    if init_r.status_code == 400:
-        err = init_r.json().get("error", {})
-        code = err.get("code")
-        msg  = err.get("message", "")
-        # Code 10 or 200 = permissions not approved via App Review
-        if code in (10, 200) or "permissions" in msg.lower() or "review" in msg.lower():
-            print("  ⚠️  Facebook upload skipped: App Review not completed yet.")
-            print("     Submit your app for Meta App Review to enable Facebook Reels posting.")
-            print(f"     Meta error: {msg}")
-            return None
-    init_r.raise_for_status()
-    video_id    = init_r.json()["video_id"]
-    upload_url  = init_r.json()["upload_url"]
-    print(f"  FB upload session created. Video ID: {video_id}")
 
-    # Step 2: Upload the file
+    if not init_r.ok:
+        err  = init_r.json().get("error", {})
+        code = err.get("code")
+        msg  = err.get("message", "Unknown error")
+        if code in (10, 200) or "permission" in msg.lower() or "review" in msg.lower():
+            print(f"  SKIPPED: App Review not approved yet.")
+            print(f"  Meta error ({code}): {msg}")
+            return None
+        raise RuntimeError(f"Facebook init failed: {init_r.status_code} — {msg}")
+
+    init_data  = init_r.json()
+    video_id   = init_data.get("video_id")
+    upload_url = init_data.get("upload_url")
+
+    if not video_id or not upload_url:
+        raise RuntimeError(f"Missing video_id or upload_url in response: {init_data}")
+
+    print(f"  Video ID: {video_id}")
+
+    # Step 2: upload video bytes
+    print("  Step 2: Uploading video bytes...")
     with open(video_path, "rb") as f:
         upload_r = requests.post(
             upload_url,
             headers={
-                "Authorization":  f"OAuth {META_ACCESS_TOKEN}",
-                "offset":         "0",
-                "file_size":      str(file_size),
-                "Content-Type":   "application/octet-stream",
+                "Authorization": f"OAuth {META_ACCESS_TOKEN}",
+                "offset":        "0",
+                "file_size":     str(file_size),
+                "Content-Type":  "application/octet-stream",
             },
             data=f,
-            timeout=300,
+            timeout=600,
         )
     upload_r.raise_for_status()
-    print("  FB file upload done.")
+    print("  File uploaded.")
 
-    # Step 3: Publish
+    # Step 3: publish reel
+    print("  Step 3: Publishing reel...")
     pub_r = requests.post(
-        f"https://graph.facebook.com/v20.0/{FACEBOOK_PAGE_ID}/video_reels",
+        f"{GRAPH_BASE}/{FACEBOOK_PAGE_ID}/video_reels",
         params={
             "access_token": META_ACCESS_TOKEN,
             "video_id":     video_id,
             "upload_phase": "finish",
             "video_state":  "PUBLISHED",
-            "description":  description[:2200],
             "title":        title[:255],
-        }
+            "description":  description[:2200],
+        },
+        timeout=30,
     )
-    pub_r.raise_for_status()
-    print(f"  Facebook Reel published. Video ID: {video_id}")
+
+    if not pub_r.ok:
+        err = pub_r.json().get("error", {})
+        raise RuntimeError(f"Facebook publish failed: {err.get('message', pub_r.text[:300])}")
+
+    print(f"  Done! Facebook Reel published. Video ID: {video_id}")
     return video_id
 
 
-# ─── INSTAGRAM ────────────────────────────────────────────────────────────────
-def upload_instagram(video_path, title, description):
-    """
-    Upload as Instagram Reel via resumable upload (Graph API v20+).
-    Requires Meta App Review approval for instagram_content_publish permission.
-    """
-    print("\n── Uploading to Instagram Reels ──")
+# ══════════════════════════════════════════════════════════════════════════════
+# INSTAGRAM REELS
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # Use the /media endpoint with upload_type=resumable
+def upload_instagram(video_path: str, description: str) -> str:
+    print_section("Uploading to Instagram Reels")
+
+    file_size = os.path.getsize(video_path)
+    print(f"  File  : {video_path} ({file_size / 1024 / 1024:.1f} MB)")
+
+    # Step 1: create media container (resumable)
+    print("  Step 1: Creating media container...")
     init_r = requests.post(
-        f"https://graph.facebook.com/v20.0/{INSTAGRAM_ACCOUNT_ID}/media",
+        f"{GRAPH_BASE}/{INSTAGRAM_ACCOUNT_ID}/media",
         params={
             "media_type":   "REELS",
             "upload_type":  "resumable",
             "caption":      description[:2200],
             "access_token": META_ACCESS_TOKEN,
-        }
+        },
+        timeout=30,
     )
-    if init_r.status_code == 400:
-        err = init_r.json().get("error", {})
+
+    if not init_r.ok:
+        err  = init_r.json().get("error", {})
         code = err.get("code")
-        msg  = err.get("message", "")
-        if code in (10, 200) or "permissions" in msg.lower() or "review" in msg.lower():
-            print("  ⚠️  Instagram upload skipped: App Review not completed yet.")
-            print("     Submit your app for Meta App Review to enable Instagram Reels posting.")
-            print(f"     Meta error: {msg}")
+        msg  = err.get("message", "Unknown error")
+        if code in (10, 200) or "permission" in msg.lower() or "review" in msg.lower():
+            print(f"  SKIPPED: App Review not approved yet.")
+            print(f"  Meta error ({code}): {msg}")
             return None
-    init_r.raise_for_status()
-    ig_container_id = init_r.json().get("id")
-    upload_url      = init_r.json().get("uri")  # resumable upload URI
+        raise RuntimeError(f"Instagram init failed: {init_r.status_code} — {msg}")
 
-    if not upload_url:
-        raise RuntimeError(f"Instagram did not return upload URI. Response: {init_r.json()}")
+    init_data    = init_r.json()
+    container_id = init_data.get("id")
+    upload_url   = init_data.get("uri")
 
-    print(f"  IG container ID: {ig_container_id}")
+    if not container_id or not upload_url:
+        raise RuntimeError(f"Missing id or uri in response: {init_data}")
 
-    # Step 2: Upload video bytes
-    file_size = os.path.getsize(video_path)
+    print(f"  Container ID: {container_id}")
+
+    # Step 2: upload video bytes
+    print("  Step 2: Uploading video bytes...")
     with open(video_path, "rb") as f:
-        up_r = requests.post(
+        upload_r = requests.post(
             upload_url,
             headers={
-                "Authorization":  f"OAuth {META_ACCESS_TOKEN}",
-                "offset":         "0",
-                "file_size":      str(file_size),
-                "Content-Type":   "application/octet-stream",
+                "Authorization": f"OAuth {META_ACCESS_TOKEN}",
+                "offset":        "0",
+                "file_size":     str(file_size),
+                "Content-Type":  "application/octet-stream",
             },
             data=f,
-            timeout=300,
+            timeout=600,
         )
-    up_r.raise_for_status()
-    print("  IG file upload done. Waiting for processing...")
+    upload_r.raise_for_status()
+    print("  File uploaded. Waiting for Instagram to process...")
 
-    # Step 3: Poll until STATUS = FINISHED
-    for _ in range(20):
+    # Step 3: poll until processing is complete
+    for attempt in range(24):   # max 4 minutes (24 x 10s)
         time.sleep(10)
         status_r = requests.get(
-            f"https://graph.facebook.com/v19.0/{ig_container_id}",
+            f"{GRAPH_BASE}/{container_id}",
             params={
-                "fields":       "status_code",
+                "fields":       "status_code,status",
                 "access_token": META_ACCESS_TOKEN,
-            }
+            },
+            timeout=15,
         )
         status_r.raise_for_status()
-        status_code = status_r.json().get("status_code")
-        print(f"  IG status: {status_code}")
+        status_data = status_r.json()
+        status_code = status_data.get("status_code", "")
+        print(f"  Processing status: {status_code} (attempt {attempt + 1}/24)")
+
         if status_code == "FINISHED":
             break
         if status_code == "ERROR":
-            raise RuntimeError("Instagram media processing failed.")
+            raise RuntimeError(f"Instagram media processing failed: {status_data}")
+    else:
+        raise RuntimeError("Instagram processing timed out after 4 minutes.")
 
-    # Step 4: Publish
+    # Step 4: publish
+    print("  Step 4: Publishing reel...")
     pub_r = requests.post(
-        f"https://graph.facebook.com/v19.0/{INSTAGRAM_ACCOUNT_ID}/media_publish",
+        f"{GRAPH_BASE}/{INSTAGRAM_ACCOUNT_ID}/media_publish",
         params={
-            "creation_id":  ig_container_id,
+            "creation_id":  container_id,
             "access_token": META_ACCESS_TOKEN,
-        }
+        },
+        timeout=30,
     )
-    pub_r.raise_for_status()
-    ig_media_id = pub_r.json().get("id")
-    print(f"  Instagram Reel published. Media ID: {ig_media_id}")
-    return ig_media_id
+
+    if not pub_r.ok:
+        err = pub_r.json().get("error", {})
+        raise RuntimeError(f"Instagram publish failed: {err.get('message', pub_r.text[:300])}")
+
+    media_id = pub_r.json().get("id", "unknown")
+    print(f"  Done! Instagram Reel published. Media ID: {media_id}")
+    return media_id
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════════════════════
+
 def main():
-    meta = load_metadata()
-    video_path  = meta["video_file"]
-    title       = meta["title"]
-    description = meta["description"]
+    print("Loading video metadata...")
+    meta        = load_metadata()
+    video_path  = meta.get("video_file", "output_video.mp4")
+    title       = meta.get("title", "Quran Recitation")
+    description = meta.get("description", "")
+
+    print(f"  Surah : {meta.get('surah_en')} ({meta.get('surah_num')})")
+    print(f"  Ayahs : {meta.get('first_ayah')} - {meta.get('last_ayah')}")
 
     if not Path(video_path).exists():
-        raise FileNotFoundError(f"Video file not found: {video_path}")
+        print(f"ERROR: Video file not found: {video_path}")
+        sys.exit(1)
 
-    errors = []
+    results = {}
 
-    if YOUTUBE_REFRESH_TOKEN:
+    # ── YouTube ───────────────────────────────────────────────────────────────
+    if YOUTUBE_REFRESH_TOKEN and YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET:
         try:
-            upload_youtube(video_path, title, description)
+            results["youtube"] = upload_youtube(video_path, title, description)
         except Exception as e:
-            print(f"  YouTube upload FAILED: {e}")
-            errors.append(f"YouTube: {e}")
+            print(f"  ERROR: YouTube upload failed — {e}")
+            results["youtube"] = None
     else:
-        print("YouTube credentials not set, skipping.")
+        print("\nYouTube credentials missing — skipping.")
+        results["youtube"] = None
 
+    # ── Facebook ──────────────────────────────────────────────────────────────
     if META_ACCESS_TOKEN and FACEBOOK_PAGE_ID:
         try:
-            upload_facebook(video_path, title, description)
+            results["facebook"] = upload_facebook(video_path, title, description)
         except Exception as e:
-            print(f"  Facebook upload FAILED: {e}")
-            errors.append(f"Facebook: {e}")
+            print(f"  ERROR: Facebook upload failed — {e}")
+            results["facebook"] = None
     else:
-        print("Facebook credentials not set, skipping.")
+        print("\nFacebook credentials missing — skipping.")
+        results["facebook"] = None
 
+    # ── Instagram ─────────────────────────────────────────────────────────────
     if META_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID:
         try:
-            upload_instagram(video_path, title, description)
+            results["instagram"] = upload_instagram(video_path, description)
         except Exception as e:
-            print(f"  Instagram upload FAILED: {e}")
-            errors.append(f"Instagram: {e}")
+            print(f"  ERROR: Instagram upload failed — {e}")
+            results["instagram"] = None
     else:
-        print("Instagram credentials not set, skipping.")
+        print("\nInstagram credentials missing — skipping.")
+        results["instagram"] = None
 
-    if errors:
-        print("\nSome uploads had issues:")
-        for e in errors:
-            print(f"  - {e}")
-        # Only exit with error if YouTube failed
-        # Meta failures are non-fatal (may need App Review)
-        if any("YouTube" in e for e in errors):
-            sys.exit(1)
-        else:
-            print("\nNote: Meta (Facebook/Instagram) uploads need App Review approval.")
-            print("YouTube upload succeeded. Workflow marked as success.")
-    else:
-        print("\nAll uploads completed successfully.")
+    # ── Summary ───────────────────────────────────────────────────────────────
+    print("\n" + "═" * 50)
+    print("  UPLOAD SUMMARY")
+    print("═" * 50)
+    print(f"  YouTube   : {'✓ ' + results['youtube'] if results['youtube'] else '✗ failed or skipped'}")
+    print(f"  Facebook  : {'✓ ' + results['facebook'] if results['facebook'] else '✗ failed or skipped'}")
+    print(f"  Instagram : {'✓ ' + results['instagram'] if results['instagram'] else '✗ failed or skipped'}")
+
+    # Only fail the workflow if YouTube failed — Meta failures are non-fatal
+    if results["youtube"] is None and (YOUTUBE_REFRESH_TOKEN and YOUTUBE_CLIENT_ID):
+        print("\nFATAL: YouTube upload failed.")
+        sys.exit(1)
+
+    print("\nWorkflow complete.")
 
 
 if __name__ == "__main__":
