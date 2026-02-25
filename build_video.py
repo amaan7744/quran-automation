@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-build_video.py
-Optimized for Meta 100MB limits.
-"""
-
 import json
 import os
 import shutil
@@ -26,22 +21,12 @@ def load_json(path: Path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def merge_final_video(
-    bg_path:        Path,
-    audio_path:     Path,
-    subtitle_path:  Path,
-    out_path:       Path,
-    total_duration: float,
-) -> None:
-    """
-    Merge background + audio + burned subtitles into final 2K video.
-    Targeting <100MB for Instagram compatibility using CRF 22 and bitrate caps.
-    """
+def merge_final_video(bg_path, audio_path, subtitle_path, out_path, total_duration):
+    """Optimized for Meta 100MB limit with CRF 22 and bitrate safety."""
     safe_sub = Path("/tmp/subs.ass")
     shutil.copy(subtitle_path, safe_sub)
 
-    # Safety Math: Target 90MB to leave a buffer for metadata
-    # (90MB * 8192) / total_seconds = max_kbps
+    # Calculate safe bitrate to target ~90MB (Buffer for safety)
     max_bitrate = int((90 * 8192) / total_duration)
 
     video_filter = (
@@ -51,70 +36,52 @@ def merge_final_video(
     )
 
     cmd = [
-        "ffmpeg", "-y",
-        "-i", str(bg_path),
-        "-i", str(audio_path),
-        "-t", str(total_duration),
-        "-vf", video_filter,
-        "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "22",               # Reduced from 16 to 22 for better compression
-        "-maxrate", f"{max_bitrate}k", # Prevents files exceeding 100MB
-        "-bufsize", f"{max_bitrate*2}k",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",              # Switched to aac for better Meta compatibility
-        "-b:a", "192k",
-        "-movflags", "+faststart",
-        "-shortest",
-        str(out_path),
+        "ffmpeg", "-y", "-i", str(bg_path), "-i", str(audio_path),
+        "-t", str(total_duration), "-vf", video_filter,
+        "-c:v", "libx264", "-preset", "slow", "-crf", "22", 
+        "-maxrate", f"{max_bitrate}k", "-bufsize", f"{max_bitrate*2}k",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest", str(out_path)
     ]
-
-    print(f"  Running FFmpeg merge (Targeting under 100MB)...")
+    
+    print(f"  Merging video (Targeting <100MB for Instagram)...")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print("FFmpeg stderr:")
-        print(result.stderr[-3000:])
-        raise RuntimeError("FFmpeg failed.")
-
+        raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:]}")
+    
     size_mb = out_path.stat().st_size / 1024 / 1024
-    print(f"  Final video -> {out_path} ({size_mb:.1f} MB)")
-
-# ... (generate_title and generate_description functions remain unchanged)
+    print(f"  Final video size: {size_mb:.1f} MB")
 
 def main():
     with tempfile.TemporaryDirectory() as _tmp:
         tmpdir = Path(_tmp)
-
-        print("Loading JSON data...")
         arabic_data = load_json(ARABIC_JSON)
         english_data = load_json(ENGLISH_JSON)
 
-        print("\nDetermining next ayah batch...")
-        batch, surah_name_en, surah_name_ar = get_next_batch()
-        surah_num = batch[0][0]
-
-        print("\nDownloading and processing audio...")
+        batch, surah_en, surah_ar = get_next_batch()
         audio_files, audio_durations = download_batch(batch, tmpdir)
         total_duration = sum(audio_durations)
+
         combined_audio = tmpdir / "combined_audio.mp3"
         concat_audio(audio_files, combined_audio)
 
-        print("\nBuilding and verifying subtitles...")
         subtitle_file = tmpdir / "subtitles.ass"
         build_subtitles(batch, arabic_data, english_data, audio_durations, subtitle_file)
 
-        print("\nFetching Pexels background...")
         bg_path = tmpdir / "background.mp4"
         clips = fetch_clips_for_duration(total_duration)
         download_and_concat_clips(clips, tmpdir, bg_path, total_duration)
 
-        print("\nMerging final video...")
         merge_final_video(bg_path, combined_audio, subtitle_file, OUTPUT_VIDEO, total_duration)
 
-        # Save Metadata and Progress
-        # (Same as your original script logic)
-        # ...
-        print(f"\nDone! Video: {OUTPUT_VIDEO}")
+        # Generate Metadata LAST so upload.py can find it
+        with open(METADATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "title": f"Surah {surah_en} {batch[0][0]}:{batch[0][1]}-{batch[-1][1]} | Quran",
+                "surah_num": batch[0][0],
+                "last_ayah": batch[-1][1],
+                "video_file": str(OUTPUT_VIDEO)
+            }, f, indent=2)
 
 if __name__ == "__main__":
     main()
