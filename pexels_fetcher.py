@@ -13,8 +13,6 @@ import subprocess
 import requests
 from pathlib import Path
 
-PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
-
 # Wide variety of nature queries — shuffled each run for maximum variety
 NATURE_QUERIES = [
     "waterfall nature",
@@ -45,7 +43,10 @@ def search_pexels_clips(query: str, count: int = 5) -> list:
     Search Pexels for short portrait nature clips.
     Returns list of video file URLs.
     """
-    headers = {"Authorization": PEXELS_API_KEY}
+    api_key = os.environ.get("PEXELS_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("PEXELS_API_KEY environment variable is not set.")
+    headers = {"Authorization": api_key}
     # Use random page to get different results each time
     page = random.randint(1, 5)
 
