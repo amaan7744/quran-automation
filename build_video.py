@@ -93,19 +93,21 @@ def merge_final_video(
 def generate_title(surah_name_en: str, surah_num: int, batch: list) -> str:
     first = batch[0][1]
     last  = batch[-1][1]
-    return f"Quran | {surah_name_en} ({surah_num}:{first}-{last}) | {RECITER_NAME}"
+    # Short punchy title optimised for Shorts — under 60 chars
+    return f"Surah {surah_name_en} {surah_num}:{first}-{last} | {RECITER_NAME} | Quran"
 
 
 def generate_description(surah_name_en, surah_name_ar, surah_num, batch):
     first = batch[0][1]
     last  = batch[-1][1]
     return (
-        f"Quran Recitation | {surah_name_ar} - {surah_name_en} (Surah {surah_num})\n"
-        f"Ayah {first}-{last}\n\n"
-        f"Recited by: {RECITER_NAME}\n"
-        f"Arabic Text: Tanzil\n"
-        f"English Translation: Sahih International\n\n"
-        f"#Quran #QuranRecitation #{surah_name_en.replace(' ', '')} #Islam #DailyQuran"
+        f"{surah_name_ar} | {surah_name_en} — Ayah {first} to {last}\n"
+        f"Recited by {RECITER_NAME}\n\n"
+        f"Listen, reflect, and share. May Allah make it a source of reward.\n\n"
+        f"Arabic: Tanzil | English: Sahih International\n\n"
+        f"#quran #quranrecitation #quranshorts #islam #islamicvideo #shorts "
+        f"#dailyquran #qurankareem #muslimshorts #islamicreminder "
+        f"#{surah_name_en.replace(' ', '').lower()} #qurantilawat #saudialshuraim"
     )
 
 
