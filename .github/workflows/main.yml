@@ -2,9 +2,9 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 05:00 UTC - Morning Middle East / South Asia
-    - cron: "0 13 * * *"  # 13:00 UTC - Afternoon Europe / Middle East
-    - cron: "0 19 * * *"  # 19:00 UTC - Evening Americas
+    - cron: "0 5 * * *"    # 05:00 UTC
+    - cron: "0 13 * * *"   # 13:00 UTC
+    - cron: "0 19 * * *"   # 19:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,6 @@ jobs:
       actions: write
 
     steps:
-
       # ── 1. Checkout ───────────────────────────────────────────────────────
       - name: "1. Checkout repository"
         uses: actions/checkout@v4
@@ -32,7 +31,6 @@ jobs:
             fonts-noto fonts-noto-core fonts-noto-extra \
             fonts-arabeyes fontconfig
           fc-cache -fv
-          fc-list | grep -i "noto" | head -10
 
       # ── 3. Python ─────────────────────────────────────────────────────────
       - name: "3. Set up Python 3.11"
@@ -44,7 +42,7 @@ jobs:
         run: pip install -r requirements.txt
 
       # ── 5. Show current progress + next batch ─────────────────────────────
-      - name: "5. audio_downloader.py — Show next ayah batch"
+      - name: "5. Show next ayah batch"
         run: |
           python -c "
           from audio_downloader import get_next_batch
@@ -52,14 +50,14 @@ jobs:
           print(f'Next batch: Surah {batch[0][0]} ({en}), Ayahs {batch[0][1]}-{batch[-1][1]}')
           "
 
-      # ── 6. Build 2K video (audio + subtitles + pexels + merge) ────────────
-      - name: "6. audio_downloader + subtitle_builder + pexels_fetcher + build_video"
+      # ── 6. Build 2K video ─────────────────────────────────────────────────
+      - name: "6. Build Video"
         env:
-          PEXELS_API_KEY:    ${{ secrets.PEXELS_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: python build_video.py
 
       # ── 7. Upload to all platforms ────────────────────────────────────────
-      - name: "7. upload.py — YouTube Shorts + Facebook Reels + Instagram Reels"
+      - name: "7. Upload to YouTube, FB, and IG"
         env:
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -71,35 +69,42 @@ jobs:
           GITHUB_REPOSITORY:     ${{ github.repository }}
         run: python upload.py
 
-      # ── 8. Save progress AFTER successful upload ──────────────────────────
-      # Runs ONLY if step 7 succeeded — progress never saved if upload failed
-      - name: "8. Save progress after successful upload"
+      # ── 8. Save progress (Python logic) ──────────────────────────────────
+      - name: "8. Update progress.json locally"
+        if: success()
         run: |
           python -c "
           import json
           from audio_downloader import write_file_progress
-
           with open('video_metadata.json') as f:
               meta = json.load(f)
-
           surah = meta['surah_num']
           ayah  = meta['last_ayah']
-
-          print(f'Saving progress: Surah {surah}, Ayah {ayah}')
           write_file_progress(surah, ayah)
-          print('progress.json updated')
           "
 
-      # ── 9. Commit progress.json to repo ───────────────────────────────────
-      - name: "9. Commit progress.json to repo"
+      # ── 9. Push Progress to GitHub (Fixes Error 128) ──────────────────────
+      - name: "9. Commit and Push progress"
+        if: success()
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
-          git pull --rebase origin main
+          # Configure Git Identity
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage and Commit changes first to avoid 'unstaged changes' rebase error
           git add progress.json
-          git diff --staged --quiet \
-            && echo "progress.json unchanged" \
-            || git commit -m "chore: progress Surah $(python -c "import json; d=json.load(open('progress.json')); print(d['last_surah'])") Ayah $(python -c "import json; d=json.load(open('progress.json')); print(d['last_ayah'])") [skip ci]"
-          git push origin main
-          echo "progress.json committed and pushed"
+          
+          # Only proceed if the file actually changed
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update progress [skip ci]"
+            
+            # Use PAT for authenticated push
+            git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+            
+            # Pull latest changes to sync before pushing
+            git pull --rebase origin main
+            git push origin main
+            echo "Successfully pushed progress updates."
+          else
+            echo "No changes to progress.json detected."
+          fi
