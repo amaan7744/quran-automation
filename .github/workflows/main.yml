@@ -2,14 +2,10 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    # 3x daily at peak audience times (UTC):
-    # 05:00 UTC = Morning Middle East / South Asia (8-9am local)
-    # 13:00 UTC = Afternoon Europe / Middle East + morning Americas
-    # 19:00 UTC = Evening Americas + night Middle East
-    - cron: "0 5 * * *"
-    - cron: "0 13 * * *"
-    - cron: "0 19 * * *"
-  workflow_dispatch: # manual trigger from Actions tab
+    - cron: "0 5 * * *"   # 05:00 UTC - Morning Middle East / South Asia
+    - cron: "0 13 * * *"  # 13:00 UTC - Afternoon Europe / Middle East
+    - cron: "0 19 * * *"  # 19:00 UTC - Evening Americas
+  workflow_dispatch:       # manual trigger from Actions tab
 
 jobs:
   build-and-upload:
@@ -17,14 +13,15 @@ jobs:
 
     steps:
 
-      # ── Step 1: Checkout repo (includes progress.json) ───────────────────
-      - name: Checkout repository
+      # ── 1. Checkout repo ──────────────────────────────────────────────────
+      - name: "1. Checkout repository"
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
 
-      # ── Step 2: Install FFmpeg, libass, Arabic and Noto fonts ────────────
-      - name: Install FFmpeg and fonts
+      # ── 2. Install FFmpeg + libass + Noto Arabic fonts ────────────────────
+      - name: "2. Install FFmpeg and Arabic fonts"
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
@@ -34,155 +31,62 @@ jobs:
             fonts-noto \
             fonts-noto-core \
             fonts-noto-extra \
-            fonts-noto-color-emoji \
             fonts-arabeyes \
             fontconfig
           fc-cache -fv
-          echo "Noto fonts installed:"
-          fc-list | grep -i "noto" | head -20
+          echo "Noto fonts available:"
+          fc-list | grep -i "noto" | head -15
 
-      # ── Step 3: Set up Python 3.11 ────────────────────────────────────────
-      - name: Set up Python
+      # ── 3. Python 3.11 ────────────────────────────────────────────────────
+      - name: "3. Set up Python 3.11"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ── Step 4: Install Python packages from requirements.txt ────────────
-      - name: Install Python dependencies
+      # ── 4. Install Python packages ────────────────────────────────────────
+      - name: "4. Install Python dependencies"
         run: pip install -r requirements.txt
 
-      # ── Step 5: audio_downloader.py — fetch ayah MP3s from everyayah.com ─
-      - name: Download ayah audio (audio_downloader.py)
+      # ── 5. Show next ayah batch from progress ─────────────────────────────
+      - name: "5. audio_downloader.py — Show next ayah batch"
         env:
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          GH_PAT:              ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY:   ${{ github.repository }}
         run: |
-          python - << 'EOF'
-          from audio_downloader import get_next_batch, download_batch, concat_audio
-          import json, tempfile
-          from pathlib import Path
-          tmpdir = Path("pipeline_tmp")
-          tmpdir.mkdir(exist_ok=True)
-          batch, surah_en, surah_ar = get_next_batch()
-          audio_files, durations = download_batch(batch, tmpdir)
-          concat_audio(audio_files, tmpdir / "combined_audio.mp3")
-          meta = {
-            "batch": batch,
-            "surah_en": surah_en,
-            "surah_ar": surah_ar,
-            "durations": durations,
-            "total_duration": sum(durations),
-          }
-          with open("pipeline_meta.json", "w") as f:
-            json.dump(meta, f)
-          print(f"Audio done: Surah {batch[0][0]} ({surah_en}), Ayahs {batch[0][1]}-{batch[-1][1]}")
-          EOF
+          python -c "
+          from audio_downloader import get_next_batch
+          batch, en, ar = get_next_batch()
+          print(f'Next: Surah {batch[0][0]} ({en}), Ayahs {batch[0][1]}-{batch[-1][1]}')
+          "
 
-      # ── Step 6: subtitle_builder.py — build Arabic + English subtitles ───
-      - name: Build subtitles (subtitle_builder.py)
-        run: |
-          python - << 'EOF'
-          import json
-          from pathlib import Path
-          from subtitle_builder import build_subtitles
-
-          with open("pipeline_meta.json") as f:
-            meta = json.load(f)
-          with open("arabic.json", encoding="utf-8") as f:
-            arabic_data = json.load(f)
-          with open("english.json", encoding="utf-8") as f:
-            english_data = json.load(f)
-
-          batch    = [tuple(b) for b in meta["batch"]]
-          durations = meta["durations"]
-          out_path  = Path("pipeline_tmp/subtitles.ass")
-
-          build_subtitles(batch, arabic_data, english_data, durations, out_path)
-          print(f"Subtitles built -> {out_path}")
-          EOF
-
-      # ── Step 7: pexels_fetcher.py — fetch multiple nature clips ──────────
-      - name: Fetch Pexels background clips (pexels_fetcher.py)
+      # ── 6. Full pipeline: audio + subtitles + pexels + 2K video ───────────
+      - name: "6. audio_downloader + subtitle_builder + pexels_fetcher + build_video"
         env:
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: |
-          python - << 'EOF'
-          import json
-          from pathlib import Path
-          from pexels_fetcher import fetch_clips_for_duration, download_and_concat_clips
+          PEXELS_API_KEY:      ${{ secrets.PEXELS_API_KEY }}
+          GH_PAT:              ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY:   ${{ github.repository }}
+        run: python build_video.py
 
-          with open("pipeline_meta.json") as f:
-            meta = json.load(f)
-
-          total_duration = meta["total_duration"]
-          tmpdir         = Path("pipeline_tmp")
-          bg_path        = tmpdir / "background.mp4"
-
-          clips = fetch_clips_for_duration(total_duration)
-          download_and_concat_clips(clips, tmpdir, bg_path, total_duration)
-          print(f"Background ready: {len(clips)} clips -> {bg_path}")
-          EOF
-
-      # ── Step 8: build_video.py — merge everything into final 2K video ────
-      - name: Merge final video (build_video.py)
-        run: |
-          python - << 'EOF'
-          import json
-          from pathlib import Path
-          from build_video import merge_final_video, generate_title, generate_description, save_metadata
-          from audio_downloader import RECITER_NAME
-
-          with open("pipeline_meta.json") as f:
-            meta = json.load(f)
-
-          batch          = [tuple(b) for b in meta["batch"]]
-          surah_en       = meta["surah_en"]
-          surah_ar       = meta["surah_ar"]
-          surah_num      = batch[0][0]
-          total_duration = meta["total_duration"]
-          tmpdir         = Path("pipeline_tmp")
-
-          merge_final_video(
-            bg_path        = tmpdir / "background.mp4",
-            audio_path     = tmpdir / "combined_audio.mp3",
-            subtitle_path  = tmpdir / "subtitles.ass",
-            out_path       = Path("output_video.mp4"),
-            total_duration = total_duration,
-          )
-
-          title       = generate_title(surah_en, surah_num, batch)
-          description = generate_description(surah_en, surah_ar, surah_num, batch)
-          save_metadata(title, description, surah_en, surah_ar, surah_num, batch)
-          print(f"Video ready: {title}")
-          EOF
-
-      # ── Step 9: upload.py — upload to YouTube Shorts ─────────────────────
-      - name: Upload to YouTube Shorts (upload.py)
+      # ── 7. Upload to YouTube Shorts ───────────────────────────────────────
+      - name: "7. upload.py — Upload to YouTube Shorts"
         env:
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          GH_PAT:                ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY:     ${{ github.repository }}
         run: python upload.py
 
-      # ── Step 10: Save progress — ONLY after full success ─────────────────
-      - name: Save ayah progress (audio_downloader.py)
-        run: |
-          python - << 'EOF'
-          import json
-          from audio_downloader import save_progress
-
-          with open("pipeline_meta.json") as f:
-            meta = json.load(f)
-
-          batch = meta["batch"]
-          save_progress(batch[-1][0], batch[-1][1])
-          print(f"Progress saved: Surah {batch[-1][0]}, Ayah {batch[-1][1]}")
-          EOF
-
-      # ── Step 11: Commit progress.json back to repo ────────────────────────
-      - name: Commit progress to repo
+      # ── 8. Commit progress.json as backup (GitHub Variable is primary) ────
+      - name: "8. Commit progress.json backup to repo"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add progress.json
-          git diff --staged --quiet || git commit -m "chore: quran progress update [skip ci]"
-          git push
+          git diff --staged --quiet \
+            && echo "No change to progress.json" \
+            || (git commit -m "chore: quran progress backup [skip ci]" && git push origin main)
+          echo "Done. Progress saved to GitHub Variable (primary) and file (backup)."
