@@ -45,9 +45,6 @@ jobs:
 
       # ── 5. Show current progress + next batch ─────────────────────────────
       - name: "5. audio_downloader.py — Show next ayah batch"
-        env:
-          GH_PAT:            ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python -c "
           from audio_downloader import get_next_batch
@@ -59,8 +56,6 @@ jobs:
       - name: "6. audio_downloader + subtitle_builder + pexels_fetcher + build_video"
         env:
           PEXELS_API_KEY:    ${{ secrets.PEXELS_API_KEY }}
-          GH_PAT:            ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python build_video.py
 
       # ── 7. Upload to all platforms ────────────────────────────────────────
@@ -77,16 +72,12 @@ jobs:
         run: python upload.py
 
       # ── 8. Save progress AFTER successful upload ──────────────────────────
-      # This runs ONLY if step 7 succeeded (GitHub Actions default behaviour)
-      # Writes final progress to both GitHub Variable AND commits progress.json
+      # Runs ONLY if step 7 succeeded — progress never saved if upload failed
       - name: "8. Save progress after successful upload"
-        env:
-          GH_PAT:            ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python -c "
           import json
-          from audio_downloader import write_github_variable, write_file_progress
+          from audio_downloader import write_file_progress
 
           with open('video_metadata.json') as f:
               meta = json.load(f)
@@ -95,9 +86,8 @@ jobs:
           ayah  = meta['last_ayah']
 
           print(f'Saving progress: Surah {surah}, Ayah {ayah}')
-          write_github_variable(surah, ayah)
           write_file_progress(surah, ayah)
-          print('Progress saved to GitHub Variable + progress.json')
+          print('progress.json updated')
           "
 
       # ── 9. Commit progress.json to repo ───────────────────────────────────
