@@ -4,6 +4,21 @@ subtitle_builder.py
 Builds ASS subtitle file from arabic.json and english.json.
 Arabic top-center, English bottom-center.
 Both always visible with dark background box and thick outline.
+
+Supports ALL known JSON formats including the nested surahs format:
+{
+  "metadata": {...},
+  "surahs": [
+    {
+      "number": 1,
+      "name": "Al-Fatihah",
+      "ayahs": [
+        {"number": 1, "text": "..."},
+        ...
+      ]
+    }
+  ]
+}
 """
 
 import textwrap
@@ -12,26 +27,49 @@ from pathlib import Path
 
 def get_ayah_text(json_data, surah: int, ayah: int) -> str:
     """
-    Extract ayah text from JSON. Supports 3 formats:
-    A. Flat list : [{"surah": 1, "ayah": 1, "text": "..."}]
-    B. Nested    : {"1": {"1": "text"}}
-    C. verse_key : [{"verse_key": "1:1", "text": "..."}]
+    Extract ayah text. Handles ALL known formats:
+
+    Format A - Nested surahs (YOUR FORMAT):
+      {"metadata": {...}, "surahs": [{"number": 1, "ayahs": [{"number": 1, "text": "..."}]}]}
+
+    Format B - Flat list:
+      [{"surah": 1, "ayah": 1, "text": "..."}]
+
+    Format C - verse_key list:
+      [{"verse_key": "1:1", "text": "..."}]
+
+    Format D - Nested dict:
+      {"1": {"1": "text"}}
     """
+
+    # ── Format A: nested surahs (Tanzil / Sahih International format) ─────────
+    if isinstance(json_data, dict) and "surahs" in json_data:
+        for s in json_data["surahs"]:
+            if s.get("number") == surah:
+                for a in s.get("ayahs", []):
+                    if a.get("number") == ayah:
+                        return a.get("text", "").strip()
+        return ""
+
+    # ── Format B: flat list with surah/ayah keys ──────────────────────────────
     if isinstance(json_data, list):
         for item in json_data:
-            # Format A
+            # integer keys
             if item.get("surah") == surah and item.get("ayah") == ayah:
                 return item.get("text", "").strip()
-            # Format A with string keys
+            # string keys
             if str(item.get("surah")) == str(surah) and str(item.get("ayah")) == str(ayah):
                 return item.get("text", "").strip()
-            # Format C
+            # Format C: verse_key
             if item.get("verse_key") == f"{surah}:{ayah}":
                 return item.get("text", "").strip()
-    elif isinstance(json_data, dict):
-        # Format B
+        return ""
+
+    # ── Format D: nested dict {"1": {"1": "text"}} ────────────────────────────
+    if isinstance(json_data, dict):
         val = json_data.get(str(surah), {}).get(str(ayah), "")
         return val.strip() if val else ""
+
     return ""
 
 
@@ -51,8 +89,8 @@ def build_subtitles(
 ) -> None:
     """
     Write ASS subtitle file with Arabic and English text.
-    Arabic  -> top-center, 110px, bold, dark background box
-    English -> bottom-center, 62px, dark background box
+    Arabic  -> top-center, 110px, bold, dark box = always visible
+    English -> bottom-center, 62px, dark box = always visible
     """
 
     header = """\
@@ -82,10 +120,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ar_text = get_ayah_text(arabic_data, surah, ayah)
         en_text = get_ayah_text(english_data, surah, ayah)
 
-        # Debug: print what was found
-        print(f"    Ayah {surah}:{ayah} -> AR: '{ar_text[:40] if ar_text else 'NOT FOUND'}' | EN: '{en_text[:40] if en_text else 'NOT FOUND'}'")
+        # Debug print so logs show what was found
+        ar_preview = ar_text[:50] if ar_text else "NOT FOUND"
+        en_preview = en_text[:50] if en_text else "NOT FOUND"
+        print(f"    {surah}:{ayah} | AR: '{ar_preview}' | EN: '{en_preview}'")
 
-        # Wrap English at 36 chars per line
         en_wrapped = r"\N".join(textwrap.wrap(en_text, width=36)) if en_text else ""
 
         if ar_text:
