@@ -2,63 +2,36 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    - cron: "0 5 * * *"    # 05:00 UTC
-    - cron: "0 13 * * *"   # 13:00 UTC
-    - cron: "0 19 * * *"   # 19:00 UTC
+    - cron: "0 5,13,19 * * *"
   workflow_dispatch:
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
-    # Explicitly grant write permissions to the GITHUB_TOKEN
     permissions:
-      contents: write
+      contents: write  # Crucial for saving progress.json
       actions: write
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────────────────────
-      - name: "1. Checkout repository"
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
-      # ── 2. Install FFmpeg + fonts ─────────────────────────────────────────
-      - name: "2. Install FFmpeg and Arabic fonts"
+      - name: Install Dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            ffmpeg libass9 libass-dev \
-            fonts-noto fonts-noto-core fonts-noto-extra \
-            fonts-arapey fonts-arabeyes fontconfig
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-arapey fonts-noto fontconfig
           fc-cache -fv
+          pip install -r requirements.txt
 
-      # ── 3. Python ─────────────────────────────────────────────────────────
-      - name: "3. Set up Python 3.11"
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: "4. Install Python dependencies"
-        run: pip install -r requirements.txt
-
-      # ── 5. Show next ayah batch ─────────────────────────────
-      - name: "5. Show next ayah batch"
-        run: |
-          python -c "
-          from audio_downloader import get_next_batch
-          batch, en, ar = get_next_batch()
-          print(f'Next batch: Surah {batch[0][0]} ({en}), Ayahs {batch[0][1]}-{batch[-1][1]}')
-          "
-
-      # ── 6. Build 2K video ─────────────────────────────────────────────────
-      - name: "6. Build Video"
+      - name: Build Video
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: python build_video.py
 
-      # ── 7. Upload to all platforms ────────────────────────────────────────
-      - name: "7. Upload to YouTube, FB, and IG"
+      - name: Upload
         env:
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -66,46 +39,21 @@ jobs:
           META_ACCESS_TOKEN:     ${{ secrets.META_ACCESS_TOKEN }}
           FACEBOOK_PAGE_ID:      ${{ secrets.FACEBOOK_PAGE_ID }}
           INSTAGRAM_ACCOUNT_ID:  ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          GH_PAT:                ${{ secrets.GH_PAT }}
-          GITHUB_REPOSITORY:     ${{ github.repository }}
         run: python upload.py
 
-      # ── 8. Save progress (Python logic) ──────────────────────────────────
-      - name: "8. Update progress.json locally"
+      - name: Save and Push Progress
         if: success()
         run: |
-          python -c "
-          import json
-          from audio_downloader import write_file_progress
-          with open('video_metadata.json') as f:
-              meta = json.load(f)
-          surah = meta['surah_num']
-          ayah  = meta['last_ayah']
-          write_file_progress(surah, ayah)
-          "
-
-      # ── 9. Push Progress to GitHub (Fixes Error 128 & Rebase Issues) ────────
-      - name: "9. Commit and Push progress"
-        if: success()
-        run: |
-          # Configure Git Identity
+          # 1. Identity Setup
+          git config --local user.email "action@github.com"
           git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage the specific file FIRST to allow pulling
+          # 2. Update progress file locally
+          python -c "import json; from audio_downloader import write_file_progress; m=json.load(open('video_metadata.json')); write_file_progress(m['surah_num'], m['last_ayah'])"
+          
+          # 3. Commit, sync, and push
           git add progress.json
-          
-          # Only proceed if changes exist
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update progress Surah $(python -c 'import json; d=json.load(open("progress.json")); print(d["last_surah"])') Ayah $(python -c 'import json; d=json.load(open("progress.json")); print(d["last_ayah"])') [skip ci]"
-            
-            # Use authenticated URL for push
-            git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
-            
-            # Sync with remote before pushing to avoid conflicts
-            git pull --rebase origin main
-            git push origin main
-            echo "Progress updated and pushed."
-          else
-            echo "No changes to progress.json."
-          fi
+          git commit -m "chore: update progress [skip ci]" || echo "No changes"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+          git pull --rebase origin main
+          git push origin main
