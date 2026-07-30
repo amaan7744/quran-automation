@@ -1,0 +1,101 @@
+name: Quran Daily Upload
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Crucial for saving progress.json
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
+
+      - name: Install FFmpeg and system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fontconfig
+
+      - name: Install fonts (DigitalKhatt IndoPak + Poppins)
+        run: |
+          mkdir -p ~/.fonts
+          # IndoPak-style Quran font (SIL OFL 1.1) — matches the traditional
+          # India/Pakistan/Bangladesh Mushaf script. See fonts/LICENSE-IndoPak.txt.
+          curl -fsSL -o ~/.fonts/DigitalKhattIndoPak.otf \
+            https://github.com/DigitalKhatt/indopakfont/releases/download/v1.0.0-beta.1/indopak.otf
+          curl -fsSL -o ~/.fonts/Poppins-Regular.ttf \
+            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf
+          curl -fsSL -o ~/.fonts/Poppins-SemiBold.ttf \
+            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf
+          fc-cache -fv
+          fc-list | grep -i "digitalkhatt" || (echo "IndoPak font failed to install" && exit 1)
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore clip quality cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/clips
+          key: clip-cache-${{ github.run_id }}
+          restore-keys: |
+            clip-cache-
+
+      - name: Build Video
+        id: build
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python build_video.py
+
+      - name: Save and Push Progress
+        if: steps.build.outcome == 'success'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "github-actions[bot]"
+          git add progress.json
+          git commit -m "chore: update progress [skip ci]" || echo "No changes"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Upload
+        if: steps.build.outcome == 'success'
+        env:
+          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          META_ACCESS_TOKEN:     ${{ secrets.META_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID:      ${{ secrets.FACEBOOK_PAGE_ID }}
+          INSTAGRAM_ACCOUNT_ID:  ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+        run: python upload.py
+
+      - name: Save upload history
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "github-actions[bot]"
+          git add upload_history.json
+          git commit -m "chore: update upload history [skip ci]" || echo "No changes"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+          git pull --rebase origin main
+          git push origin main || echo "Nothing to push"
+
+      - name: Upload logs and metadata as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-artifacts
+          path: |
+            logs/
+            video_metadata.json
+          retention-days: 7

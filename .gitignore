@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.cache/
+logs/
+output_video.mp4
+video_metadata.json
