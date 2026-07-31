@@ -24,7 +24,7 @@ from config import (
 )
 from logging_utils import get_logger
 from quality_filter import (
-    is_used_before, mark_used, cached_path_for, remember_download, score_and_gate,
+    is_used_before, mark_used, cached_path_for, remember_download, analyze_clip,
 )
 from video_effects import apply_motion, crossfade_concat
 
@@ -131,6 +131,13 @@ def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
     """
     Downloads and quality-gates candidates until we have enough footage,
     returns a list of (path, duration) for accepted clips only.
+
+    Every downloaded candidate is fully analyzed (analyze_clip) regardless
+    of whether it passes strict gating, so if strict gating rejects
+    everything we can still rank all *usable* (non-corrupted) candidates by
+    quality score and fall back to the best of them rather than failing the
+    whole run. The pipeline only raises if every downloaded clip is
+    genuinely corrupted/unreadable.
     """
     candidates = gather_candidates()
     if not candidates:
@@ -138,6 +145,7 @@ def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
 
     needed = total_duration * DURATION_BUFFER
     accepted = []
+    analyzed = []  # (path, duration, id, score) for every usable (non-corrupted) clip
     accumulated = 0.0
 
     for candidate in candidates:
@@ -149,20 +157,52 @@ def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
             log.warning("  Download failed for clip %s: %s", candidate["id"], e)
             continue
 
-        passed, score, reasons = score_and_gate(path, tmpdir)
-        if not passed:
-            log.info("  Rejected clip %s: %s", candidate["id"], "; ".join(reasons))
+        result = analyze_clip(path, tmpdir)
+        if result is None:
+            # Genuinely corrupted/unreadable — the only case we discard outright.
+            log.warning("  Discarding corrupted/unusable clip %s", candidate["id"])
             path.unlink(missing_ok=True)
             continue
 
-        remember_download(candidate["id"], path, score)
-        mark_used(candidate["id"])
-        accepted.append((path, candidate["duration"], score))
-        accumulated += candidate["duration"]
-        log.info("  Accepted clip %s (score=%.2f, %.1fs)", candidate["id"], score, candidate["duration"])
+        analyzed.append((path, candidate["duration"], candidate["id"], result["score"]))
+
+        if result["passed"]:
+            remember_download(candidate["id"], path, result["score"])
+            mark_used(candidate["id"])
+            accepted.append((path, candidate["duration"], result["score"]))
+            accumulated += candidate["duration"]
+            log.info("  Accepted clip %s (score=%.2f, %.1fs)", candidate["id"], result["score"], candidate["duration"])
+        else:
+            log.info("  Rejected clip %s: %s", candidate["id"], "; ".join(result["reasons"]))
 
     if not accepted:
-        raise PexelsError("No candidate clips passed quality gating this run.")
+        # FALLBACK STRATEGY: nothing passed strict gating. Rank every usable
+        # (non-corrupted) candidate by quality score and take the best ones
+        # instead of failing the run — a good-enough clip beats no clip.
+        if not analyzed:
+            raise PexelsError(
+                "No usable clips: every downloaded candidate was corrupted or unreadable."
+            )
+        log.warning(
+            "FALLBACK MODE: no clip passed strict quality gates this run — "
+            "ranking all %d usable candidates by score and using the best instead "
+            "of failing the pipeline.", len(analyzed),
+        )
+        analyzed.sort(key=lambda c: c[3], reverse=True)
+        acc = 0.0
+        for path, duration, cid, score in analyzed:
+            if acc >= needed:
+                break
+            remember_download(cid, path, score)
+            mark_used(cid)
+            accepted.append((path, duration, score))
+            acc += duration
+            log.warning("  Fallback-selected clip %s (score=%.2f, %.1fs)", cid, score, duration)
+
+    if not accepted:
+        raise PexelsError(
+            "No usable clips: every downloaded candidate was corrupted or unreadable."
+        )
 
     # Highest quality first so the best footage anchors the edit; still shuffle
     # lightly so runs don't always open on the same theme.
