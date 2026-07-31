@@ -43,6 +43,7 @@ MAX_VIDEO_SIZE_BYTES = 4 * 1024 * 1024 * 1024  # 4GB practical ceiling for Reels
 NON_RETRYABLE_OAUTH_ERRORS = {"invalid_grant", "invalid_client", "unauthorized_client", "invalid_request"}
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 TRANSIENT_META_ERROR_CODES = {1, 2}  # Meta's own "unknown/temporary" error codes
+FACEBOOK_UNSUPPORTED_FIELD_ERROR_CODE = 100  # "(#100) Tried accessing nonexisting field ..."
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -137,30 +138,108 @@ def validate_video_file(path: Path) -> None:
         )
 
 
-def facebook_get_token_type() -> str:
+def facebook_get_token_type() -> tuple:
     """
-    Best-effort detection of whether META_ACCESS_TOKEN is a User or a Page token.
-    Page tokens return a 'category' field on /me; user tokens do not.
+    Determines whether META_ACCESS_TOKEN is a User Access Token or a Page
+    Access Token, and returns (token_type, owner_id, owner_name) where
+    token_type is "user" or "page".
+
+    This relies on two Graph API facts:
+      - GET /me?fields=id,name is valid for BOTH User and Page tokens.
+        Critically, a Page token's /me does NOT return the admin user who
+        generated it — it resolves to the Page itself (id/name of the
+        Page). A User token's /me resolves to the user's own id/name.
+      - "category" is only a valid field on Page objects, never on User
+        objects. Requesting an invalid field is NOT silently ignored by
+        Graph — it raises a hard error: (#100) "Tried accessing
+        nonexisting field (category)". Requesting it directly on /me
+        (as this function used to do) therefore hard-fails for User
+        tokens instead of just telling us "this isn't a Page".
+
+    The fix: never request "category" on /me. Instead, resolve /me's own
+    id first, then query THAT id's node for "category". For a Page token,
+    that node IS the Page object, so the field is valid and succeeds. For
+    a User token, that node is the User object, so the field is invalid
+    and fails with the specific #100 "nonexisting field" error — which we
+    treat as a positive, expected signal that this is a User token, not
+    an unrelated failure.
     """
-    r = requests.get(f"{GRAPH_BASE}/me", params={
-        "fields": "id,name,category",
+    me_r = requests.get(f"{GRAPH_BASE}/me", params={
+        "fields": "id,name",
         "access_token": META_ACCESS_TOKEN,
     }, timeout=15)
-    if not r.ok:
-        _raise_for_platform_error(r, "Facebook token introspection")
-    data = r.json()
-    return "page" if "category" in data else "user"
+    if not me_r.ok:
+        _raise_for_platform_error(me_r, "Facebook token introspection (/me)")
+
+    me_data = me_r.json()
+    owner_id = me_data.get("id")
+    owner_name = me_data.get("name")
+    if not owner_id:
+        raise NonRetryableUploadError("Facebook token introspection (/me) returned no id.")
+
+    log.info("Facebook token introspection: /me resolved to id=%s, name=%s", owner_id, owner_name)
+
+    # Query the resolved node (not /me) for "category" — valid only on
+    # Page objects. This is the "query the Page object" step.
+    cat_r = requests.get(f"{GRAPH_BASE}/{owner_id}", params={
+        "fields": "category",
+        "access_token": META_ACCESS_TOKEN,
+    }, timeout=15)
+
+    if cat_r.ok:
+        log.info(
+            "Facebook token introspection: node %s exposes 'category' -> "
+            "META_ACCESS_TOKEN is a Page Access Token for '%s' (id=%s).",
+            owner_id, owner_name, owner_id,
+        )
+        return "page", owner_id, owner_name
+
+    try:
+        err_body = cat_r.json()
+    except ValueError:
+        err_body = {}
+    err_obj = err_body.get("error", {}) if isinstance(err_body, dict) else {}
+    err_code = err_obj.get("code")
+    err_message = (err_obj.get("message") or "")
+
+    if err_code == FACEBOOK_UNSUPPORTED_FIELD_ERROR_CODE and "nonexisting field" in err_message.lower():
+        log.info(
+            "Facebook token introspection: node %s has no 'category' field (%s) -> "
+            "META_ACCESS_TOKEN is a User Access Token for '%s' (id=%s).",
+            owner_id, err_message, owner_name, owner_id,
+        )
+        return "user", owner_id, owner_name
+
+    # Any other failure (permission error, expired token, transient 5xx,
+    # etc.) is a real problem we can't safely classify as "just a User
+    # token" — surface it through the normal error path.
+    _raise_for_platform_error(cat_r, f"Facebook token introspection (category check on {owner_id})")
 
 
 def validate_facebook_setup() -> None:
     require_env_vars({"META_ACCESS_TOKEN": META_ACCESS_TOKEN, "FACEBOOK_PAGE_ID": FACEBOOK_PAGE_ID})
 
-    token_type = facebook_get_token_type()
-    if token_type != "page":
+    token_type, owner_id, owner_name = facebook_get_token_type()
+
+    if token_type == "user":
         raise NonRetryableUploadError(
-            "META_ACCESS_TOKEN is a User Access Token. Facebook Reels publishing requires a "
-            "Page Access Token issued for this Page, with the pages_manage_posts and "
-            "publish_video permissions granted."
+            f"META_ACCESS_TOKEN is a User Access Token (user '{owner_name}', id={owner_id}). "
+            "Facebook Reels publishing requires a Page Access Token issued for the target "
+            "Page itself — a User token cannot publish Reels regardless of which permissions "
+            "it carries. Generate a Page Access Token for the configured Page (e.g. via "
+            "GET /{page-id}?fields=access_token using a User token that administers the "
+            "Page, or the Graph API Explorer's 'Page Access Token' option) and grant it the "
+            "pages_manage_posts and publish_video permissions."
+        )
+
+    # token_type == "page": this confirms META_ACCESS_TOKEN is *a* Page
+    # token, but not necessarily for the *configured* Page — check that
+    # explicitly before trusting it for uploads.
+    if owner_id != FACEBOOK_PAGE_ID:
+        raise NonRetryableUploadError(
+            f"META_ACCESS_TOKEN is a valid Page Access Token, but for Page '{owner_name}' "
+            f"(id={owner_id}) — not the configured FACEBOOK_PAGE_ID={FACEBOOK_PAGE_ID}. "
+            "Generate/set a Page Access Token issued specifically for the configured Page."
         )
 
     page_r = requests.get(f"{GRAPH_BASE}/{FACEBOOK_PAGE_ID}", params={
@@ -168,6 +247,9 @@ def validate_facebook_setup() -> None:
     }, timeout=15)
     if not page_r.ok:
         _raise_for_platform_error(page_r, f"Facebook Page validation ({FACEBOOK_PAGE_ID})")
+
+    log.info("Facebook token validated: Page Access Token for '%s' (id=%s) matches configured Page.",
+              owner_name, owner_id)
 
 
 def validate_instagram_setup() -> None:
