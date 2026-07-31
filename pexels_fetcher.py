@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """
 pexels_fetcher.py
-Fetches, quality-gates, caches, and edits nature stock footage into a
-single moving background video that matches the audio duration exactly.
+Fetches simple, good-looking vertical nature footage from Pexels and
+assembles it into a single background video for the Quran video.
+
+Deliberately simple, fast pipeline (no perceptual quality analysis):
+  1. Search Pexels for nature videos.
+  2. Download vertical videos only.
+  3. Reject a downloaded clip only if it's not vertical, below
+     720x1280, shorter than MIN_CLIP_DURATION, or corrupted/unreadable
+     (all checked with a single cheap ffprobe call — see quality_filter.py).
+  4. Randomly select enough clips to cover the needed duration.
+  5. Trim each clip to a random 3-5s length.
+  6. Concatenate them together.
+  7. Add smooth crossfades between clips.
+  8. Use the result as the background for the Quran video.
 
 NOTE ON SOURCE: this pipeline uses the Pexels video API. Pinterest has no
 public API for searching/downloading third-party video content, so there
-is no "Pinterest pipeline" to swap in here — this module is the real
-visual source described in the brief, hardened with quality scoring,
-caching, and motion editing.
+is no "Pinterest pipeline" to swap in here.
 """
 
 import random
@@ -20,13 +30,11 @@ import requests
 from config import (
     PEXELS_API_KEY, PEXELS_SEARCH_URL, NATURE_QUERIES, CLIPS_PER_QUERY,
     QUERIES_PER_RUN, DURATION_BUFFER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
-    VIDEO_FPS,
+    CLIP_TRIM_MIN, CLIP_TRIM_MAX, VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS,
+    TRANSITION_DURATION,
 )
 from logging_utils import get_logger
-from quality_filter import (
-    is_used_before, mark_used, cached_path_for, remember_download, analyze_clip,
-)
-from video_effects import apply_motion, crossfade_concat
+from quality_filter import is_used_before, mark_used, cached_path_for, validate_clip
 
 log = get_logger(__name__)
 
@@ -36,7 +44,7 @@ class PexelsError(RuntimeError):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# SEARCH
+# 1. SEARCH
 # ══════════════════════════════════════════════════════════════════════════
 
 def search_pexels(query: str, count: int, session: requests.Session) -> list:
@@ -68,19 +76,19 @@ def search_pexels(query: str, count: int, session: requests.Session) -> list:
         if vid_id is None or is_used_before(vid_id):
             continue
 
+        # 2. Download vertical videos only — pick the largest portrait file.
         files = vid.get("video_files", [])
         portrait = [f for f in files if f.get("height", 0) > f.get("width", 1)]
-        pool = portrait if portrait else files
-        pool.sort(key=lambda x: x.get("width", 0) * x.get("height", 0), reverse=True)
-        if not pool or not pool[0].get("link"):
+        if not portrait:
+            continue
+        portrait.sort(key=lambda x: x.get("width", 0) * x.get("height", 0), reverse=True)
+        if not portrait[0].get("link"):
             continue
 
         candidates.append({
             "id": vid_id,
-            "url": pool[0]["link"],
+            "url": portrait[0]["link"],
             "duration": duration,
-            "width": pool[0].get("width", 0),
-            "height": pool[0].get("height", 0),
         })
         if len(candidates) >= count:
             break
@@ -102,7 +110,7 @@ def gather_candidates() -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# DOWNLOAD + QUALITY GATE
+# DOWNLOAD
 # ══════════════════════════════════════════════════════════════════════════
 
 def download_clip(url: str, dest: Path) -> None:
@@ -127,25 +135,23 @@ def acquire_clip(candidate: dict, tmpdir: Path) -> Path:
     return cached
 
 
-def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
-    """
-    Downloads and quality-gates candidates until we have enough footage,
-    returns a list of (path, duration) for accepted clips only.
+# ══════════════════════════════════════════════════════════════════════════
+# 3-4. VALIDATE + RANDOMLY SELECT
+# ══════════════════════════════════════════════════════════════════════════
 
-    Every downloaded candidate is fully analyzed (analyze_clip) regardless
-    of whether it passes strict gating, so if strict gating rejects
-    everything we can still rank all *usable* (non-corrupted) candidates by
-    quality score and fall back to the best of them rather than failing the
-    whole run. The pipeline only raises if every downloaded clip is
-    genuinely corrupted/unreadable.
+def collect_clips(total_duration: float, tmpdir: Path) -> list:
+    """
+    Downloads candidates, validates each with a single cheap ffprobe check
+    (see quality_filter.validate_clip), and randomly selects enough of them
+    to cover total_duration (with a small buffer for trimming/crossfades).
+    Returns a list of (path, trim_duration) pairs.
     """
     candidates = gather_candidates()
     if not candidates:
         raise PexelsError("Pexels returned no new candidates. Check API key/quota or query list.")
 
     needed = total_duration * DURATION_BUFFER
-    accepted = []
-    analyzed = []  # (path, duration, id, score) for every usable (non-corrupted) clip
+    selected = []
     accumulated = 0.0
 
     for candidate in candidates:
@@ -157,57 +163,96 @@ def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
             log.warning("  Download failed for clip %s: %s", candidate["id"], e)
             continue
 
-        result = analyze_clip(path, tmpdir)
-        if result is None:
-            # Genuinely corrupted/unreadable — the only case we discard outright.
-            log.warning("  Discarding corrupted/unusable clip %s", candidate["id"])
+        ok, reason = validate_clip(path)
+        if not ok:
+            log.info("  Rejected clip %s: %s", candidate["id"], reason)
             path.unlink(missing_ok=True)
             continue
 
-        analyzed.append((path, candidate["duration"], candidate["id"], result["score"]))
+        trim_duration = round(random.uniform(CLIP_TRIM_MIN, CLIP_TRIM_MAX), 2)
+        mark_used(candidate["id"])
+        selected.append((path, trim_duration))
+        accumulated += trim_duration
+        log.info("  Selected clip %s (trim=%.1fs)", candidate["id"], trim_duration)
 
-        if result["passed"]:
-            remember_download(candidate["id"], path, result["score"])
-            mark_used(candidate["id"])
-            accepted.append((path, candidate["duration"], result["score"]))
-            accumulated += candidate["duration"]
-            log.info("  Accepted clip %s (score=%.2f, %.1fs)", candidate["id"], result["score"], candidate["duration"])
-        else:
-            log.info("  Rejected clip %s: %s", candidate["id"], "; ".join(result["reasons"]))
+    if not selected:
+        raise PexelsError("No usable clips: every downloaded candidate was invalid, corrupted, or unreadable.")
 
-    if not accepted:
-        # FALLBACK STRATEGY: nothing passed strict gating. Rank every usable
-        # (non-corrupted) candidate by quality score and take the best ones
-        # instead of failing the run — a good-enough clip beats no clip.
-        if not analyzed:
-            raise PexelsError(
-                "No usable clips: every downloaded candidate was corrupted or unreadable."
-            )
-        log.warning(
-            "FALLBACK MODE: no clip passed strict quality gates this run — "
-            "ranking all %d usable candidates by score and using the best instead "
-            "of failing the pipeline.", len(analyzed),
+    random.shuffle(selected)
+    return selected
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5. TRIM / NORMALIZE
+# ══════════════════════════════════════════════════════════════════════════
+
+def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
+    """
+    Single fast ffmpeg pass: scale+crop to the output canvas and trim to
+    `duration` seconds. No motion effects, no analysis — just a clean cut
+    ready for crossfade concatenation.
+    """
+    vf = (
+        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},format=yuv420p"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-i", str(src),
+        "-t", str(duration),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-an",
+        str(dst),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Trim/normalize failed on {src.name}: {result.stderr[-400:]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 6-7. CONCATENATE WITH CROSSFADES
+# ══════════════════════════════════════════════════════════════════════════
+
+def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
+                      transition: float = TRANSITION_DURATION, fps: int = VIDEO_FPS) -> None:
+    """Joins normalized clips with simple xfade crossfade transitions."""
+    if len(clip_paths) == 1:
+        cmd = ["ffmpeg", "-y", "-i", str(clip_paths[0]), "-c", "copy", str(out_path)]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return
+
+    inputs = []
+    for p in clip_paths:
+        inputs += ["-i", str(p)]
+
+    filter_parts = []
+    cumulative = 0.0
+    last_label = "0:v"
+
+    for i in range(1, len(clip_paths)):
+        offset = max(cumulative + durations[i - 1] - transition, 0.1)
+        out_label = f"v{i}" if i < len(clip_paths) - 1 else "vout"
+        filter_parts.append(
+            f"[{last_label}][{i}:v]xfade=transition=fade:duration={transition}:offset={offset:.3f}[{out_label}]"
         )
-        analyzed.sort(key=lambda c: c[3], reverse=True)
-        acc = 0.0
-        for path, duration, cid, score in analyzed:
-            if acc >= needed:
-                break
-            remember_download(cid, path, score)
-            mark_used(cid)
-            accepted.append((path, duration, score))
-            acc += duration
-            log.warning("  Fallback-selected clip %s (score=%.2f, %.1fs)", cid, score, duration)
+        cumulative += durations[i - 1] - transition
+        last_label = out_label
 
-    if not accepted:
-        raise PexelsError(
-            "No usable clips: every downloaded candidate was corrupted or unreadable."
-        )
+    filter_complex = ";".join(filter_parts)
 
-    # Highest quality first so the best footage anchors the edit; still shuffle
-    # lightly so runs don't always open on the same theme.
-    accepted.sort(key=lambda c: c[2], reverse=True)
-    return [(p, d) for p, d, _ in accepted]
+    cmd = [
+        "ffmpeg", "-y", *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-r", str(fps),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-an",
+        str(out_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Crossfade concat failed: {result.stderr[-500:]}")
+    log.info("Crossfade background assembled -> %s", out_path.name)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -216,27 +261,26 @@ def collect_quality_clips(total_duration: float, tmpdir: Path) -> list:
 
 def build_background(total_duration: float, tmpdir: Path, out_path: Path) -> None:
     """
-    Full pipeline: search -> quality gate -> motion edit each clip ->
-    crossfade concat -> trim to exact audio duration.
+    Full pipeline: search -> validate -> select -> trim -> crossfade concat
+    -> trim to exact audio duration.
     """
-    clips = collect_quality_clips(total_duration, tmpdir)
+    clips = collect_clips(total_duration, tmpdir)
 
-    motion_paths, motion_durations = [], []
+    trimmed_paths, trimmed_durations = [], []
     for i, (path, duration) in enumerate(clips):
-        motion_out = tmpdir / f"motion_{i:03d}.mp4"
-        style = apply_motion(path, motion_out, duration, fps=VIDEO_FPS)
-        log.info("  Applied motion '%s' to clip %d/%d", style, i + 1, len(clips))
-        motion_paths.append(motion_out)
-        motion_durations.append(duration)
+        trimmed_out = tmpdir / f"trim_{i:03d}.mp4"
+        trim_and_normalize(path, trimmed_out, duration)
+        trimmed_paths.append(trimmed_out)
+        trimmed_durations.append(duration)
 
     joined = tmpdir / "bg_joined.mp4"
-    crossfade_concat(motion_paths, motion_durations, joined, fps=VIDEO_FPS)
+    crossfade_concat(trimmed_paths, trimmed_durations, joined, fps=VIDEO_FPS)
 
     # Trim/pad to the exact audio duration
     cmd = [
         "ffmpeg", "-y", "-i", str(joined),
         "-t", str(total_duration),
-        "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
         "-an", str(out_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
