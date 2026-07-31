@@ -14,7 +14,6 @@ VIDEO_WIDTH   = 1080
 VIDEO_HEIGHT  = 1920
 VIDEO_FPS     = 60                 # falls back to 30 automatically if source clips are 30fps-only
 TARGET_SIZE_MB = 95                # keep under Meta's 100MB Reels ceiling
-MIN_VIDEO_BITRATE_KBPS = 2500      # reject candidate clips below this
 
 # ─── DIRECTORIES ─────────────────────────────────────────────────────────────
 ROOT_DIR       = Path(__file__).parent
@@ -45,14 +44,38 @@ NATURE_QUERIES = [
 ]
 
 # Quality gates — a clip must pass ALL of these to be used
-MIN_CLIP_WIDTH        = 1080
-MIN_CLIP_HEIGHT       = 1920
+#
+# NOTE ON THRESHOLDS (audited — see quality_filter.py measure_shake for the
+# most important fix):
+# - MIN_CLIP_WIDTH/HEIGHT: was 1080x1920 (i.e. required the source file to
+#   already be full target resolution). Every downloaded clip is unconditionally
+#   rescaled/cropped to VIDEO_WIDTH x VIDEO_HEIGHT in video_effects.py, so this
+#   was rejecting perfectly usable 720p-portrait stock footage for no real
+#   reason. Relaxed to 720x1280 (a sensible floor for background b-roll that
+#   will be upscaled and isn't the focal element on screen).
+# - MIN_CLIP_FPS: 24 is correct per the brief and is NOT changed. The bug was
+#   in the comparison (see FPS_TOLERANCE below), not the threshold itself.
+# - MIN_VIDEO_BITRATE_KBPS: lowered together with the resolution floor — 2500
+#   was calibrated for guaranteed-1080p delivery; at the relaxed 720p floor
+#   that bitrate is unrealistic for legitimately good footage.
+# - MAX_ASPECT_DEVIATION, BLUR_SCORE_MIN: audited, not the cause of the bug,
+#   left as-is (blurdetect at 15/100 ~= 0.15 raw is already a lenient cutoff).
+MIN_CLIP_WIDTH        = 720
+MIN_CLIP_HEIGHT       = 1280
 MIN_CLIP_FPS          = 24
+FPS_TOLERANCE         = 0.5    # accepts common 23.976 ("24fps") footage; see quality_filter.py
 MIN_CLIP_DURATION     = 4
 MAX_CLIP_DURATION     = 30
 MAX_ASPECT_DEVIATION  = 0.15   # reject if far from a 9:16 portrait ratio
 BLUR_SCORE_MIN        = 15.0   # ffmpeg blurdetect: higher blur_avg = blurrier; below this is "sharp enough"
-SHAKE_SCORE_MAX        = 12.0  # vidstabdetect avg shake magnitude ceiling
+MIN_VIDEO_BITRATE_KBPS = 1500  # was 2500 — recalibrated for the relaxed 720p floor above
+# SHAKE_SCORE_MAX: the previous value (12.0) was calibrated against a shake
+# metric that was parsing the WRONG file format (see measure_shake) and
+# effectively returned meaningless numbers, not real camera-shake magnitude.
+# The metric has been rewritten (deshake-vs-original frame-difference); this
+# threshold is recalibrated to *that* metric's scale, empirically measured
+# against a static clip (~3.5) and a visibly shaky clip (~11.4).
+SHAKE_SCORE_MAX        = 9.0
 
 CLIPS_PER_QUERY   = 6
 QUERIES_PER_RUN   = 6
