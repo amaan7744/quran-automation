@@ -3,7 +3,7 @@
 quality_filter.py
 Scores and gates downloaded stock clips before they are allowed into
 the edit. Uses ffprobe for stream metadata and ffmpeg analysis filters
-(blurdetect, freezedetect, vidstabdetect) for perceptual quality —
+(blurdetect, freezedetect, deshake) for perceptual quality —
 no ML dependencies required.
 
 Also owns a small on-disk cache keyed by clip URL/id so the same
@@ -17,8 +17,8 @@ from pathlib import Path
 
 from config import (
     CACHE_DIR, CACHE_INDEX_FILE, MIN_CLIP_WIDTH, MIN_CLIP_HEIGHT,
-    MIN_CLIP_FPS, MAX_ASPECT_DEVIATION, BLUR_SCORE_MIN, SHAKE_SCORE_MAX,
-    MIN_VIDEO_BITRATE_KBPS,
+    MIN_CLIP_FPS, FPS_TOLERANCE, MAX_ASPECT_DEVIATION, BLUR_SCORE_MIN,
+    SHAKE_SCORE_MAX, MIN_VIDEO_BITRATE_KBPS,
 )
 from logging_utils import get_logger
 
@@ -153,47 +153,74 @@ def measure_freeze(path: Path) -> bool:
 
 def measure_shake(path: Path, tmpdir: Path) -> float:
     """
-    Runs vidstabdetect and reads the average per-frame transform magnitude
-    out of the generated transforms file as a shakiness proxy.
+    Shake proxy: runs ffmpeg's built-in `deshake` filter (block-matching
+    stabilization, single pass, no external files) alongside the original
+    frames, takes the per-pixel absolute difference between original and
+    stabilized output, and averages the luma difference (signalstats YAVG)
+    across frames. A stable/tripod clip barely changes under stabilization
+    (low diff); a shaky clip needs large corrections (high diff).
+
+    This replaces a previous implementation that hand-parsed vidstabdetect's
+    `.trf` transforms file — that file only contains raw local-motion
+    feature lists in the installed libvidstab version
+    (`Frame n (List <count> [(LM ...)])`), not a simple per-frame global
+    transform, so the old parser was extracting unrelated numbers (e.g. the
+    feature count, which is always large) and reporting them as "shake".
+    That produced large, meaningless scores for essentially every clip —
+    including genuinely stable ones — which is why low-shake clips were
+    still being rejected.
+
+    Calibrated empirically: a static test clip averages ~3.5, a visibly
+    shaky test clip (30px sinusoidal jitter) averages ~11.4. See
+    SHAKE_SCORE_MAX in config.py.
     """
-    trf = tmpdir / f"{path.stem}.trf"
     cmd = [
         "ffmpeg", "-v", "quiet", "-t", "3", "-i", str(path),
-        "-vf", f"vidstabdetect=shakiness=6:result={trf}", "-f", "null", "-",
+        "-filter_complex",
+        "[0:v]split[a][b];[b]deshake=edge=blank[stab];"
+        "[a][stab]blend=all_mode=difference,signalstats,"
+        "metadata=print:file=-:key=lavfi.signalstats.YAVG",
+        "-f", "null", "-",
     ]
-    subprocess.run(cmd, capture_output=True, text=True)
-    if not trf.exists():
-        return 0.0
-    try:
-        text = trf.read_text(errors="ignore")
-        mags = []
-        for line in text.splitlines():
-            if line.startswith("Frame"):
-                # format: Frame <n> {vec ...}  — approximate magnitude by field count/values
-                nums = [float(x) for x in line.replace("{", " ").replace("}", " ").split()
-                        if x.replace("-", "").replace(".", "").isdigit()]
-                if len(nums) >= 3:
-                    mags.append(abs(nums[1]) + abs(nums[2]))
-        return sum(mags) / len(mags) if mags else 0.0
-    except OSError:
-        return 0.0
-    finally:
-        trf.unlink(missing_ok=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    vals = []
+    for line in result.stdout.splitlines():
+        if "YAVG=" in line:
+            try:
+                vals.append(float(line.split("YAVG=")[1].strip()))
+            except (ValueError, IndexError):
+                continue
+    return sum(vals) / len(vals) if vals else 0.0
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # COMBINED SCORE / GATE
 # ══════════════════════════════════════════════════════════════════════════
 
-def score_and_gate(path: Path, tmpdir: Path) -> tuple:
+def analyze_clip(path: Path, tmpdir: Path) -> dict | None:
     """
-    Runs all quality checks on a downloaded clip.
-    Returns (passed: bool, score: float, reasons: list[str]).
-    Higher score = better; only clips that pass every hard gate are scored.
-    """
-    reasons = []
-    meta = probe(path)
+    Runs all quality checks on a downloaded clip and always computes a
+    composite score when the file is readable — even if it fails one or
+    more soft/hard gates. This lets callers do strict gating (see
+    score_and_gate) AND rank rejected-but-usable clips for fallback mode
+    without re-running analysis.
 
+    Returns None only if the file is genuinely corrupted/unusable (ffprobe
+    can't read it, or it has no valid video dimensions/duration) — the only
+    condition that should ever remove a clip from consideration entirely.
+
+    Returns a dict: {meta, blur, freeze, shake, score, passed, reasons}.
+    """
+    try:
+        meta = probe(path)
+    except RuntimeError as e:
+        log.warning("Corrupted/unreadable clip %s: %s", path, e)
+        return None
+    if meta["width"] <= 0 or meta["height"] <= 0 or meta["duration"] <= 0:
+        log.warning("Unusable clip %s: no valid video stream (%s)", path, meta)
+        return None
+
+    reasons = []
     if meta["width"] < MIN_CLIP_WIDTH or meta["height"] < MIN_CLIP_HEIGHT:
         reasons.append(f"resolution too low ({meta['width']}x{meta['height']})")
     if meta["height"] <= meta["width"]:
@@ -202,29 +229,29 @@ def score_and_gate(path: Path, tmpdir: Path) -> tuple:
         aspect = meta["width"] / meta["height"]
         if abs(aspect - TARGET_ASPECT) > MAX_ASPECT_DEVIATION:
             reasons.append(f"aspect ratio too far from 9:16 ({aspect:.2f})")
-    if meta["fps"] < MIN_CLIP_FPS:
-        reasons.append(f"fps too low ({meta['fps']:.1f})")
+    # FPS_TOLERANCE absorbs common NTSC-derived rates like 23.976 (24000/1001)
+    # that are practically "24fps" but were being rejected by a strict '<'
+    # comparison against an integer 24.
+    if meta["fps"] < MIN_CLIP_FPS - FPS_TOLERANCE:
+        reasons.append(f"fps too low ({meta['fps']:.2f})")
     if meta["bitrate_kbps"] and meta["bitrate_kbps"] < MIN_VIDEO_BITRATE_KBPS:
         reasons.append(f"bitrate too low ({meta['bitrate_kbps']}kbps)")
-
-    if reasons:
-        return False, 0.0, reasons
 
     blur = measure_blur(path)
     if blur > BLUR_SCORE_MIN:
         reasons.append(f"too blurry (blur={blur:.1f})")
 
-    if measure_freeze(path):
+    freeze = measure_freeze(path)
+    if freeze:
         reasons.append("contains frozen/static segment")
 
     shake = measure_shake(path, tmpdir)
     if shake > SHAKE_SCORE_MAX:
         reasons.append(f"too shaky (shake={shake:.1f})")
 
-    if reasons:
-        return False, 0.0, reasons
-
-    # Composite score: reward resolution, framerate, bitrate; penalize blur+shake
+    # Composite score: reward resolution, framerate, bitrate; penalize
+    # blur+shake. Computed unconditionally (not just on pass) so fallback
+    # ranking has a real quality signal instead of a flat 0.
     score = (
         (meta["width"] * meta["height"]) / 1_000_000  # megapixels
         + meta["fps"] / 30
@@ -232,4 +259,22 @@ def score_and_gate(path: Path, tmpdir: Path) -> tuple:
         - blur / 10
         - shake / 10
     )
-    return True, round(score, 3), []
+    return {
+        "meta": meta, "blur": blur, "freeze": freeze, "shake": shake,
+        "score": round(score, 3), "passed": not reasons, "reasons": reasons,
+    }
+
+
+def score_and_gate(path: Path, tmpdir: Path) -> tuple:
+    """
+    Strict pass/fail gate, kept for backward compatibility. Returns
+    (passed: bool, score: float, reasons: list[str]) — only passing clips
+    get a nonzero score. For fallback ranking of rejected-but-usable clips,
+    call analyze_clip() directly instead.
+    """
+    result = analyze_clip(path, tmpdir)
+    if result is None:
+        return False, 0.0, ["corrupted or unreadable"]
+    if not result["passed"]:
+        return False, 0.0, result["reasons"]
+    return True, result["score"], []
