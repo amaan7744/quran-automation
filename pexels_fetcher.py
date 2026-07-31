@@ -4,19 +4,40 @@ pexels_fetcher.py
 Fetches simple, good-looking vertical nature footage from Pexels and
 assembles it into a single background video for the Quran video.
 
-Deliberately simple, fast pipeline (no perceptual quality analysis):
+Pipeline:
   1. Search Pexels for nature videos.
   2. Download vertical videos only.
-  3. Reject a downloaded clip only if it's not vertical, below
-     720x1280, shorter than MIN_CLIP_DURATION, or corrupted/unreadable
-     (all checked with a single cheap ffprobe call — see quality_filter.py).
-  4. Randomly select enough clips to cover the needed duration.
-  5. Trim each clip to a random 3-5s length AND normalize it to a
+  3. Reject a downloaded clip if it's not vertical, below 720x1280,
+     shorter than MIN_CLIP_DURATION, or corrupted/unreadable (all
+     checked with a single cheap ffprobe call — see quality_filter.py).
+  4. HUMAN FILTER (mandatory, fully automatic — see HUMAN FILTER note
+     below): sample multiple frames across the whole clip and run them
+     through a person detector. Any detection anywhere in the clip
+     rejects it outright. No human review, no approval step — a
+     rejected clip is simply discarded and the next candidate is tried,
+     automatically, until enough clean clips are collected.
+  5. Randomly select enough human-free clips to cover the needed
+     duration, pulling additional search rounds automatically if the
+     first batch isn't enough (see MAX_GATHER_ROUNDS).
+  6. Trim each clip to a random 3-5s length AND normalize it to a
      single common format (resolution, constant fps, pixel format,
      SAR, timebase) — see NORMALIZATION note below.
-  6. Concatenate the now-identical clips together.
-  7. Add smooth crossfades between clips.
-  8. Use the result as the background for the Quran video.
+  7. Concatenate the now-identical clips together.
+  8. Add smooth crossfades between clips.
+  9. Use the result as the background for the Quran video.
+
+HUMAN FILTER NOTE:
+NO HUMAN MAY EVER APPEAR IN THE BACKGROUND — not even for one frame.
+Pexels' keyword search is not a content guarantee: a "waterfall" or
+"forest" search can and does return clips with a person walking
+through, a hand entering frame, a distant figure, a silhouette, or a
+reflection. Because of that, every downloaded clip is screened by
+human_filter.clip_contains_person() (YOLOv8n over several sampled
+frames spread across the whole clip, not just frame 1) before it's
+allowed into the selected set. This is a hard gate: a positive
+detection rejects the clip immediately and unconditionally, with no
+manual step. See human_filter.py for the full detection approach and
+its honestly-stated limits.
 
 NORMALIZATION NOTE:
 Pexels clips arrive with mixed frame rates (24/25/30/60fps), mixed
@@ -55,6 +76,7 @@ from config import (
 )
 from logging_utils import get_logger
 from quality_filter import is_used_before, mark_used, cached_path_for, validate_clip
+from human_filter import clip_contains_person, HumanFilterError
 
 log = get_logger(__name__)
 
@@ -63,6 +85,13 @@ log = get_logger(__name__)
 # source Pexels file used. 90000 is the standard MPEG-TS-style timescale
 # and divides evenly for all target fps values we care about (24/25/30/60).
 NORMALIZED_TIMESCALE = 90000
+
+# Safety cap on how many additional Pexels search rounds collect_clips()
+# will run to find enough human-free clips before giving up. Each round
+# issues QUERIES_PER_RUN searches (see gather_candidates). Bounded so a
+# query list that's unusually people-heavy can't turn into an unbounded
+# loop burning API quota / CI minutes — it fails loudly instead.
+MAX_GATHER_ROUNDS = 4
 
 
 class PexelsError(RuntimeError):
@@ -165,44 +194,95 @@ def acquire_clip(candidate: dict, tmpdir: Path) -> Path:
 # 3-4. VALIDATE + RANDOMLY SELECT
 # ══════════════════════════════════════════════════════════════════════════
 
+def _evaluate_candidate(candidate: dict, tmpdir: Path):
+    """
+    Downloads one candidate and runs it through every automatic gate:
+    ffprobe validity, then (the hard requirement) the human-detection
+    filter. Returns (path, trim_duration) if the clip is accepted, or
+    None if it was rejected/failed at any stage. Never asks for manual
+    input — every branch either accepts or rejects and moves on.
+    """
+    try:
+        path = acquire_clip(candidate, tmpdir)
+    except requests.RequestException as e:
+        log.warning("  Download failed for clip %s: %s", candidate["id"], e)
+        return None
+
+    ok, reason = validate_clip(path)
+    if not ok:
+        log.info("  Rejected clip %s: %s", candidate["id"], reason)
+        path.unlink(missing_ok=True)
+        return None
+
+    try:
+        has_person = clip_contains_person(path, candidate["duration"], tmpdir)
+    except HumanFilterError:
+        # Detector itself is unusable (e.g. dependency missing) — this is
+        # a hard requirement, so we cannot silently skip the check and
+        # let unscreened footage through. Fail loudly instead.
+        raise
+    if has_person:
+        log.info("  Rejected clip %s: contains a person", candidate["id"])
+        path.unlink(missing_ok=True)
+        # Marked as used so it's never re-downloaded/re-scanned by a
+        # future run — same dedup mechanism as a normally-consumed clip.
+        mark_used(candidate["id"])
+        return None
+
+    trim_duration = round(random.uniform(CLIP_TRIM_MIN, CLIP_TRIM_MAX), 2)
+    mark_used(candidate["id"])
+    log.info("  Selected clip %s (trim=%.1fs)", candidate["id"], trim_duration)
+    return path, trim_duration
+
+
 def collect_clips(total_duration: float, tmpdir: Path) -> list:
     """
-    Downloads candidates, validates each with a single cheap ffprobe check
-    (see quality_filter.validate_clip), and randomly selects enough of them
-    to cover total_duration (with a small buffer for trimming/crossfades).
-    Returns a list of (path, trim_duration) pairs.
-    """
-    candidates = gather_candidates()
-    if not candidates:
-        raise PexelsError("Pexels returned no new candidates. Check API key/quota or query list.")
+    Downloads candidates, validates each (ffprobe check + mandatory
+    human-detection filter — see human_filter.py), and randomly selects
+    enough human-free clips to cover total_duration (with a small buffer
+    for trimming/crossfades). Returns a list of (path, trim_duration)
+    pairs.
 
+    Fully automatic end to end: if one search round doesn't turn up
+    enough usable clips (e.g. an unusually people-heavy batch), it
+    automatically pulls another round of candidates and keeps going —
+    up to MAX_GATHER_ROUNDS — with no manual intervention.
+    """
     needed = total_duration * DURATION_BUFFER
     selected = []
     accumulated = 0.0
+    tried_ids = set()
 
-    for candidate in candidates:
+    for round_num in range(1, MAX_GATHER_ROUNDS + 1):
         if accumulated >= needed:
             break
-        try:
-            path = acquire_clip(candidate, tmpdir)
-        except requests.RequestException as e:
-            log.warning("  Download failed for clip %s: %s", candidate["id"], e)
-            continue
 
-        ok, reason = validate_clip(path)
-        if not ok:
-            log.info("  Rejected clip %s: %s", candidate["id"], reason)
-            path.unlink(missing_ok=True)
-            continue
+        candidates = [c for c in gather_candidates() if c["id"] not in tried_ids]
+        if not candidates:
+            if round_num == 1:
+                raise PexelsError("Pexels returned no new candidates. Check API key/quota or query list.")
+            log.info("Round %d: no new candidates found, stopping search early", round_num)
+            break
 
-        trim_duration = round(random.uniform(CLIP_TRIM_MIN, CLIP_TRIM_MAX), 2)
-        mark_used(candidate["id"])
-        selected.append((path, trim_duration))
-        accumulated += trim_duration
-        log.info("  Selected clip %s (trim=%.1fs)", candidate["id"], trim_duration)
+        log.info("Round %d: evaluating %d candidates (%.1fs / %.1fs collected so far)",
+                  round_num, len(candidates), accumulated, needed)
+
+        for candidate in candidates:
+            if accumulated >= needed:
+                break
+            tried_ids.add(candidate["id"])
+            result = _evaluate_candidate(candidate, tmpdir)
+            if result is None:
+                continue
+            path, trim_duration = result
+            selected.append((path, trim_duration))
+            accumulated += trim_duration
 
     if not selected:
-        raise PexelsError("No usable clips: every downloaded candidate was invalid, corrupted, or unreadable.")
+        raise PexelsError(
+            "No usable clips: every downloaded candidate was invalid, corrupted, "
+            "unreadable, or contained a person."
+        )
 
     random.shuffle(selected)
     return selected
