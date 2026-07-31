@@ -29,7 +29,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # NOTE: This project fetches stock nature footage from Pexels, not Pinterest.
 # Pinterest has no public API for searching/downloading third-party video
 # content, so there is nothing to "improve" there — the Pexels pipeline below
-# is the real visual source and has been hardened instead.
+# is the real visual source.
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 PEXELS_SEARCH_URL = "https://api.pexels.com/videos/search"
 
@@ -43,47 +43,25 @@ NATURE_QUERIES = [
     "tropical beach waves", "pine forest fog",
 ]
 
-# Quality gates — a clip must pass ALL of these to be used
-#
-# NOTE ON THRESHOLDS (audited — see quality_filter.py measure_shake for the
-# most important fix):
-# - MIN_CLIP_WIDTH/HEIGHT: was 1080x1920 (i.e. required the source file to
-#   already be full target resolution). Every downloaded clip is unconditionally
-#   rescaled/cropped to VIDEO_WIDTH x VIDEO_HEIGHT in video_effects.py, so this
-#   was rejecting perfectly usable 720p-portrait stock footage for no real
-#   reason. Relaxed to 720x1280 (a sensible floor for background b-roll that
-#   will be upscaled and isn't the focal element on screen).
-# - MIN_CLIP_FPS: 24 is correct per the brief and is NOT changed. The bug was
-#   in the comparison (see FPS_TOLERANCE below), not the threshold itself.
-# - MIN_VIDEO_BITRATE_KBPS: lowered together with the resolution floor — 2500
-#   was calibrated for guaranteed-1080p delivery; at the relaxed 720p floor
-#   that bitrate is unrealistic for legitimately good footage.
-# - MAX_ASPECT_DEVIATION, BLUR_SCORE_MIN: audited, not the cause of the bug,
-#   left as-is (blurdetect at 15/100 ~= 0.15 raw is already a lenient cutoff).
+# Clip selection — only basic ffprobe metadata is checked, no perceptual
+# analysis. A clip is rejected only if: not vertical, resolution below
+# MIN_CLIP_WIDTH x MIN_CLIP_HEIGHT, duration below MIN_CLIP_DURATION, or
+# corrupted/unreadable by ffprobe.
 MIN_CLIP_WIDTH        = 720
 MIN_CLIP_HEIGHT       = 1280
-MIN_CLIP_FPS          = 24
-FPS_TOLERANCE         = 0.5    # accepts common 23.976 ("24fps") footage; see quality_filter.py
-MIN_CLIP_DURATION     = 4
-MAX_CLIP_DURATION     = 30
-MAX_ASPECT_DEVIATION  = 0.15   # reject if far from a 9:16 portrait ratio
-BLUR_SCORE_MIN        = 15.0   # ffmpeg blurdetect: higher blur_avg = blurrier; below this is "sharp enough"
-MIN_VIDEO_BITRATE_KBPS = 1500  # was 2500 — recalibrated for the relaxed 720p floor above
-# SHAKE_SCORE_MAX: the previous value (12.0) was calibrated against a shake
-# metric that was parsing the WRONG file format (see measure_shake) and
-# effectively returned meaningless numbers, not real camera-shake magnitude.
-# The metric has been rewritten (deshake-vs-original frame-difference); this
-# threshold is recalibrated to *that* metric's scale, empirically measured
-# against a static clip (~3.5) and a visibly shaky clip (~11.4).
-SHAKE_SCORE_MAX        = 9.0
+MIN_CLIP_DURATION     = 3
+MAX_CLIP_DURATION     = 30     # upper bound used only to filter Pexels search results
 
 CLIPS_PER_QUERY   = 6
 QUERIES_PER_RUN   = 6
 DURATION_BUFFER   = 1.35   # fetch 35% more footage than needed for editing headroom
 
-# ─── VIDEO EDITING (motion / transitions) ────────────────────────────────────
-TRANSITION_DURATION = 0.6     # seconds, crossfade/blur transition between clips
-MOTION_STYLES = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "drift"]
+# Each selected clip is trimmed to a random duration in this range before concatenation.
+CLIP_TRIM_MIN = 3.0
+CLIP_TRIM_MAX = 5.0
+
+# ─── VIDEO EDITING (transitions) ─────────────────────────────────────────────
+TRANSITION_DURATION = 0.6     # seconds, crossfade transition between clips
 
 # ─── SUBTITLES ────────────────────────────────────────────────────────────────
 # IndoPak-style Quran font (matches the traditional Mushaf script used across
