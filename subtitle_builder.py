@@ -49,10 +49,12 @@ regardless of ayah length.
 ARABIC KARAOKE DIRECTION
 -------------------------
 See `_rtl_karaoke_wrap` for a full explanation of why plain `{\\kNN}word`
-sequences can visually highlight left-to-right (like English) even though
-the Arabic text itself is stored in correct reading order, and how
-explicit Unicode bidi control characters fix it properly instead of
-faking it with reversed text.
+sequences visually highlight left-to-right (like English) even though the
+Arabic text itself is stored in correct reading order, and why the fix is
+to decouple screen position (controlled by word order) from highlight
+timing (controlled by explicit `\\t` color transforms), rather than
+relying on Unicode bidi control characters, which do not affect libass's
+run-by-run placement of `\\k`-separated text.
 """
 
 import textwrap
@@ -331,52 +333,87 @@ def estimate_word_timings(text: str, duration: float) -> list:
 
 
 # ── RTL karaoke ─────────────────────────────────────────────────────────
-# Unicode bidi control characters used to force correct right-to-left
-# rendering of the karaoke-tagged Arabic line. See _rtl_karaoke_wrap.
-_RLE = "\u202B"  # Right-to-Left Embedding
-_PDF = "\u202C"  # Pop Directional Formatting
-_RLM = "\u200F"  # Right-to-Left Mark
+# Colors used for the manual per-word highlight transform below. These must
+# stay in sync with the "Arabic" style's PrimaryColour / SecondaryColour in
+# HEADER_TEMPLATE (&H0081B910 / &H00E8E8E8) since we no longer let \k drive
+# the Primary/Secondary swap — we set both colors explicitly per word.
+ARABIC_KARAOKE_SECONDARY_COLOR = "&H00E8E8E8&"  # resting ("not yet recited")
+ARABIC_KARAOKE_PRIMARY_COLOR   = "&H0081B910&"  # highlighted ("being recited")
+
+# Length of the color swap itself (ms). Short enough to read as an instant
+# "snap" per word rather than a visible wipe, but non-zero so libass has a
+# well-formed \t interval to animate.
+KARAOKE_TRANSFORM_MS = 80
 
 
 def _rtl_karaoke_wrap(word_timings: list) -> str:
     """
-    Builds an ASS karaoke string for Arabic text that highlights in true
-    right-to-left reading order, e.g. '{\\k37}word1 {\\k42}word2 ...'
-    wrapped so it actually *displays* right-to-left.
+    Builds an ASS string for Arabic karaoke that is simultaneously:
+      - visually correct (word 1, the first-recited word, ends up on the
+        RIGHT, with subsequent words running right-to-left toward the left
+        — normal Arabic reading order), and
+      - temporally correct (word 1 highlights first, word 2 second, etc.,
+        in true recitation order).
 
-    Why this is necessary: a plain `{\\kNN}word` sequence highlights in
-    the order the words appear in the underlying string (logical/reading
-    order) — word 1 first, word 2 second, etc. For Arabic that is already
-    the correct reading order (word 1 is the first word recited). The bug
-    reported ("karaoke behaves like English, left→right") happens at the
-    *rendering* stage, not the timing stage: each `{\\kNN}` override tag
-    interrupts Unicode's bidi paragraph analysis, and several ASS/libass
-    versions then fall back to treating the text as left-to-right by
-    default. The visible result is that both the word order and the
-    highlight sweep get flipped to look like English, even though the
-    underlying Arabic string and its \\k timings were never wrong.
+    Why not plain `{\\kNN}word`: libass lays out `\\k`-separated runs via a
+    left-to-right pen advance *in the order they appear in the source
+    string*, and `\\k` also activates highlights strictly in that same
+    source order. Both position and timing are driven by the identical
+    "order in the string" variable, so there is no way to fix the visual
+    left→right bug by simply reordering words under plain `\\k` — doing so
+    would just as surely reverse the highlight sequence, since the same
+    reordering feeds both mechanisms at once. This is also why wrapping
+    the text in RLE/RLM/PDF bidi-control characters has no effect: those
+    only influence bidi-level computation for glyph shaping/mirroring
+    *within* a run, not libass's run-by-run placement across separate
+    `\\k`-delimited runs.
 
-    The fix is to make the direction explicit instead of relying on
-    inference:
-      - The whole sequence is wrapped in RLE ... PDF (Right-to-Left
-        Embedding / Pop Directional Formatting), forcing the entire
-        paragraph into RTL layout regardless of the override tags inside
-        it.
-      - Each word is additionally prefixed with an RLM (Right-to-Left
-        Mark), so every run — including the ones immediately following a
-        `{\\kNN}` tag — is unambiguously anchored as RTL text on its own,
-        not just inherited from the paragraph.
-    The \\k timings themselves are untouched and still advance through the
-    string in logical order; only the display direction is corrected, so
-    word 1 now correctly renders on the right and lights up first, moving
-    right→left exactly as the ayah is recited. Nothing is reversed or
-    faked — this is the standards-compliant way to tell the renderer
-    "this text is RTL."
+    The fix decouples the two:
+      - Screen position is controlled by literally reversing the WORD
+        order in the emitted string (word_N ... word_1). Since libass
+        advances the pen left-to-right through the string, the *last*
+        word written ends up *rightmost* on screen — so writing word 1
+        last places it correctly on the right. Only whole-word order
+        changes; each word's internal character sequence — and therefore
+        its Arabic shaping, letter joining, and ligatures via HarfBuzz —
+        is left completely untouched, so nothing is reversed at the
+        letter level.
+      - Highlight timing is controlled by an explicit `\\t(t1,t2,\\cXXXXXX)`
+        color transform per word, using absolute millisecond offsets
+        relative to this Dialogue line's own start time — not `\\k`'s
+        cumulative, order-dependent duration. Word 1 always gets t1=0
+        regardless of where it physically sits in the string, so its
+        highlight fires first no matter its screen position.
+
+    Net effect: word 1 is rightmost AND lights up first; each following
+    word appears progressively further left and lights up progressively
+    later — a highlight that visibly travels right-to-left, matching real
+    Quran recitation, with correct Arabic shaping preserved throughout.
     """
     if not word_timings:
         return ""
-    parts = [f"{{\\k{cs}}}{_RLM}{escape_ass(w)}" for w, cs in word_timings]
-    return _RLE + " ".join(parts) + _PDF
+
+    # Compute each word's absolute highlight window in true recitation
+    # order first (word 1 = word_timings[0] gets the earliest window).
+    timed_words = []
+    cumulative_ms = 0
+    for word, cs in word_timings:
+        start_ms = cumulative_ms
+        duration_ms = cs * 10  # \k centiseconds -> milliseconds
+        end_ms = start_ms + min(duration_ms, KARAOKE_TRANSFORM_MS)
+        timed_words.append((word, start_ms, end_ms))
+        cumulative_ms += duration_ms
+
+    # Only NOW reverse for display: last-recited word first in the string,
+    # first-recited word last — so word 1 ends up rightmost on screen.
+    # Its (start_ms, end_ms) travel with it, so timing is unaffected.
+    parts = [
+        f"{{\\c{ARABIC_KARAOKE_SECONDARY_COLOR}"
+        f"\\t({start_ms},{end_ms},\\c{ARABIC_KARAOKE_PRIMARY_COLOR})}}"
+        f"{escape_ass(word)}"
+        for word, start_ms, end_ms in reversed(timed_words)
+    ]
+    return " ".join(parts)
 
 
 def build_karaoke_text(text: str, duration: float) -> str:
