@@ -4,6 +4,12 @@ build_video.py
 Orchestrates the full pipeline: fetch ayah audio -> master audio ->
 build karaoke subtitles -> fetch/edit a moving nature background ->
 composite the final 1080x1920 video -> write metadata for upload.py.
+
+SCOPE NOTE: subtitle placement/styling/karaoke direction and deep audio
+mastering are owned by subtitle_builder.py and audio_processor.py
+respectively — this file only calls into them and composites their
+output. Anything requiring changes to *what* the subtitles look like or
+*how* the recitation is mastered belongs in those modules, not here.
 """
 
 import json
@@ -29,6 +35,20 @@ OUTPUT_VIDEO  = Path("output_video.mp4")
 METADATA_FILE = Path("video_metadata.json")
 
 MAX_STAGE_RETRIES = 2
+
+# ─── REEL LENGTH ──────────────────────────────────────────────────────────
+# Premium Quran Shorts/Reels stay short. Rather than always rendering a
+# fixed ayah count, we fetch the usual batch and then keep only a
+# Quran-ordered PREFIX of it that fits this window — never skipping,
+# never repeating, never splitting an ayah mid-way.
+TARGET_MAX_DURATION = 40.0   # aim to stop growing the batch around here
+HARD_MAX_DURATION   = 45.0   # never exceed this except for a single long ayah
+
+# ─── VISUAL POLISH ────────────────────────────────────────────────────────
+# Slow, duration-normalized Ken Burns zoom applied to the background during
+# the final composite. Subtle by design — see build_video_filter().
+ENABLE_CINEMATIC_ZOOM = True
+CINEMATIC_ZOOM_MAX    = 1.05  # 5% zoom over the full clip, never more
 
 
 def load_json(path: Path):
@@ -63,6 +83,93 @@ def detect_hw_encoder() -> str:
     return "libx264"
 
 
+def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list):
+    """
+    Enforces the 30-40s (45s hard cap) target Reel length by keeping only
+    a Quran-ordered PREFIX of the fetched batch. Ayahs beyond the cap are
+    simply left unused this run — save_progress() only advances to the
+    last ayah actually included, so nothing is skipped, split, or
+    repeated; the remainder is picked up on the next run.
+
+    Always keeps at least the first ayah, even if it alone exceeds the
+    hard cap, since an ayah is never split.
+    """
+    if not batch:
+        return batch, audio_files, audio_durations
+
+    kept = 1
+    cumulative = audio_durations[0]
+    for i in range(1, len(batch)):
+        projected = cumulative + audio_durations[i]
+        if projected > HARD_MAX_DURATION:
+            break
+        cumulative = projected
+        kept += 1
+        if cumulative >= TARGET_MAX_DURATION:
+            break
+
+    if kept < len(batch):
+        log.info(
+            "Trimming batch from %d to %d ayah(s) to stay within the %.0fs Reel target "
+            "(%.1fs -> %.1fs). Remaining ayah(s) carry over to the next run.",
+            len(batch), kept, HARD_MAX_DURATION, sum(audio_durations), cumulative,
+        )
+    if cumulative > HARD_MAX_DURATION:
+        log.warning(
+            "Ayah %s:%s alone is %.1fs, exceeding the %.0fs target — keeping it "
+            "uncut since ayahs are never split.",
+            batch[0][0], batch[0][1], cumulative, HARD_MAX_DURATION,
+        )
+
+    return batch[:kept], audio_files[:kept], audio_durations[:kept]
+
+
+def build_video_filter(with_zoom: bool, total_duration: float) -> str:
+    """
+    Builds the ffmpeg -vf chain for the final composite: fit to the target
+    canvas, optionally apply a slow cinematic zoom, then burn in subtitles.
+
+    The zoom rate is derived from total_duration so a 30s Reel and a 45s
+    Reel both reach CINEMATIC_ZOOM_MAX exactly by the final frame, rather
+    than zooming at a fixed per-frame rate that would look faster/slower
+    depending on ayah length.
+    """
+    filters = [
+        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase",
+        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}",
+        f"fps={VIDEO_FPS}",
+    ]
+    if with_zoom:
+        total_frames = max(VIDEO_FPS * total_duration, 1.0)
+        zoom_increment = (CINEMATIC_ZOOM_MAX - 1.0) / total_frames
+        filters.append(
+            f"zoompan=z='min(zoom+{zoom_increment:.8f},{CINEMATIC_ZOOM_MAX})':"
+            f"d=1:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS}"
+        )
+    filters.append("ass=/tmp/subs.ass")
+    return ",".join(filters)
+
+
+def _run_render(bg_path: Path, audio_path: Path, total_duration: float,
+                 video_filter: str, codec_args: list, max_bitrate: int,
+                 out_path: Path) -> subprocess.CompletedProcess:
+    cmd = [
+        "ffmpeg", "-y", "-i", str(bg_path), "-i", str(audio_path),
+        "-t", str(total_duration), "-vf", video_filter,
+        *codec_args,
+        "-maxrate", f"{max_bitrate}k", "-bufsize", f"{max_bitrate * 2}k",
+        "-pix_fmt", "yuv420p",
+        # Single-pass loudness normalization to the standard short-form
+        # social target (~-14 LUFS). This is a final polish pass only —
+        # real mastering (de-essing, warmth, harshness removal) happens
+        # upstream in audio_processor.master_audio().
+        "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest", str(out_path),
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
 def merge_final_video(bg_path: Path, audio_path: Path, subtitle_path: Path,
                        out_path: Path, total_duration: float) -> None:
     """Composites background + subtitles + mastered audio into the final deliverable."""
@@ -71,47 +178,32 @@ def merge_final_video(bg_path: Path, audio_path: Path, subtitle_path: Path,
 
     max_bitrate = int((TARGET_SIZE_MB * 8192) / total_duration)
     encoder = detect_hw_encoder()
-
-    video_filter = (
-        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        f"fps={VIDEO_FPS},"
-        f"ass=/tmp/subs.ass"
+    codec_args = (
+        ["-c:v", "libx264", "-preset", "slow", "-crf", "20"]
+        if encoder == "libx264"
+        # Hardware encoders don't support CRF the same way — drive with bitrate instead.
+        else ["-c:v", encoder, "-b:v", f"{max_bitrate}k"]
     )
 
-    if encoder == "libx264":
+    video_filter = build_video_filter(with_zoom=ENABLE_CINEMATIC_ZOOM, total_duration=total_duration)
+
+    log.info("Rendering final video (%dx%d @ %dfps, encoder=%s, zoom=%s, target <%dMB)...",
+              VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, encoder, ENABLE_CINEMATIC_ZOOM, TARGET_SIZE_MB)
+    result = _run_render(bg_path, audio_path, total_duration, video_filter, codec_args, max_bitrate, out_path)
+
+    if result.returncode != 0 and encoder != "libx264":
+        log.warning("Hardware encode failed, retrying with libx264: %s", result.stderr[-300:])
+        encoder = "libx264"
         codec_args = ["-c:v", "libx264", "-preset", "slow", "-crf", "20"]
-    else:
-        # Hardware encoders don't support CRF the same way — drive with bitrate instead.
-        codec_args = ["-c:v", encoder, "-b:v", f"{max_bitrate}k"]
+        result = _run_render(bg_path, audio_path, total_duration, video_filter, codec_args, max_bitrate, out_path)
 
-    cmd = [
-        "ffmpeg", "-y", "-i", str(bg_path), "-i", str(audio_path),
-        "-t", str(total_duration), "-vf", video_filter,
-        *codec_args,
-        "-maxrate", f"{max_bitrate}k", "-bufsize", f"{max_bitrate * 2}k",
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart", "-shortest", str(out_path),
-    ]
+    if result.returncode != 0 and ENABLE_CINEMATIC_ZOOM:
+        log.warning("Render with cinematic zoom failed, retrying without it: %s", result.stderr[-300:])
+        video_filter = build_video_filter(with_zoom=False, total_duration=total_duration)
+        result = _run_render(bg_path, audio_path, total_duration, video_filter, codec_args, max_bitrate, out_path)
 
-    log.info("Rendering final video (%dx%d @ %dfps, encoder=%s, target <%dMB)...",
-              VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, encoder, TARGET_SIZE_MB)
-    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        if encoder != "libx264":
-            log.warning("Hardware encode failed, retrying with libx264: %s", result.stderr[-300:])
-            codec_args = ["-c:v", "libx264", "-preset", "slow", "-crf", "20"]
-            cmd = [
-                "ffmpeg", "-y", "-i", str(bg_path), "-i", str(audio_path),
-                "-t", str(total_duration), "-vf", video_filter,
-                *codec_args,
-                "-maxrate", f"{max_bitrate}k", "-bufsize", f"{max_bitrate * 2}k",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-                "-movflags", "+faststart", "-shortest", str(out_path),
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg render failed: {result.stderr[-500:]}")
+        raise RuntimeError(f"FFmpeg render failed: {result.stderr[-500:]}")
 
     size_mb = out_path.stat().st_size / 1024 / 1024
     log.info("Final video size: %.1f MB", size_mb)
@@ -215,6 +307,10 @@ def main():
         validate_batch_text(batch, arabic_data, english_data)
 
         audio_files, audio_durations = with_retries("download audio", download_batch, batch, tmpdir)
+
+        # Keep only a Quran-ordered prefix of the batch so the final Reel
+        # stays within the 30-40s (45s hard cap) target. See docstring.
+        batch, audio_files, audio_durations = fit_batch_to_duration(batch, audio_files, audio_durations)
         total_duration = sum(audio_durations)
 
         raw_audio = tmpdir / "combined_audio_raw.mp3"
@@ -255,7 +351,9 @@ def main():
         # YouTube/Facebook/Instagram upload succeeds — otherwise a single
         # upload failure (or unconfigured credentials) freezes the whole
         # pipeline on the same batch forever, which is exactly what caused
-        # the "always the same 7 ayahs" bug.
+        # the "always the same 7 ayahs" bug. Uses the (possibly trimmed)
+        # batch, so any ayahs left out by fit_batch_to_duration() are
+        # correctly picked up on the next run rather than skipped.
         save_progress(batch[0][0], batch[-1][1])
 
         log.info("Pipeline complete: Surah %s %d:%d-%d", surah_en, batch[0][0], batch[0][1], batch[-1][1])
