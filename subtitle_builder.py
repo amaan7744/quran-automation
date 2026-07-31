@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
 """
 subtitle_builder.py
-Documentary-style ASS subtitles: word-level karaoke highlighting on the
-Arabic line, smooth fade + pop-in animation, adaptive font sizing, safe
-margins, and a strict two-line cap for both Arabic and the translation.
+Premium-style ASS subtitles for Quran reels: a single visually centered
+subtitle block (Arabic + translation) with true right-to-left karaoke
+highlighting, adaptive font sizing, safe margins for Instagram/Facebook/
+YouTube Shorts, and a strict two-line cap for both Arabic and the
+translation.
 
 Word timing is estimated by distributing each ayah's known duration
 across its words, weighted by character length (a simple, dependency-free
 proxy for recitation pacing). For frame-accurate word timing, feed this
 module output from a forced aligner (e.g. aeneas/gentle) via the same
 `words` structure — see `estimate_word_timings`.
+
+LAYOUT
+------
+Arabic and its translation are treated as one centered subtitle block:
+  - The block's vertical center sits slightly above the exact middle of
+    the frame (BLOCK_CENTER_Y), which is where the Arabic line naturally
+    lands — easy to read, doesn't crowd the top or bottom safe zones.
+  - The translation is always positioned directly beneath the Arabic
+    block with a fixed gap (BLOCK_GAP), never overlapping.
+  - Both pieces use explicit `\\pos` placement computed from each line's
+    *actual* estimated height (font size × line count), not fixed style
+    margins — so the block stays visually centered and correctly spaced
+    whether the Arabic is one line or two, and whether the translation
+    is short or long.
+  - SAFE_TOP_MARGIN / SAFE_BOTTOM_MARGIN keep the whole block clear of
+    platform chrome (username/caption overlays at the top, engagement
+    buttons/captions at the bottom) on Reels/Shorts.
 
 ARABIC SIZING / WRAPPING
 -------------------------
@@ -24,8 +43,16 @@ illegibility or letting it overflow/clip, such ayat are split into
 multiple sequentially-timed "chunks" at word boundaries, each capped at
 two lines and shown for the portion of the ayah's audio duration covering
 its words (using the same per-word timing used for karaoke highlighting).
-This guarantees no clipping and no overlap with the English track
+This guarantees no clipping and no overlap with the translation track
 regardless of ayah length.
+
+ARABIC KARAOKE DIRECTION
+-------------------------
+See `_rtl_karaoke_wrap` for a full explanation of why plain `{\\kNN}word`
+sequences can visually highlight left-to-right (like English) even though
+the Arabic text itself is stored in correct reading order, and how
+explicit Unicode bidi control characters fix it properly instead of
+faking it with reversed text.
 """
 
 import textwrap
@@ -56,11 +83,11 @@ ARABIC_MAX_FONT_SIZE = 110  # ceiling so very short ayat don't look oversized
 ARABIC_WRAP_SAFETY = 0.92
 
 
-def arabic_line_capacity(font_size: int) -> int:
-    """Max characters (Unicode codepoints) that fit in ARABIC_MAX_LINES
-    lines at the given font size, for the configured Arabic font."""
+def arabic_line_capacity(font_size: int, lines: int = ARABIC_MAX_LINES) -> int:
+    """Max characters (Unicode codepoints) that fit in `lines` lines at the
+    given font size, for the configured Arabic font."""
     px_per_char = PX_PER_CHAR_PER_FONTSIZE * font_size
-    total_px = ARABIC_MAX_LINES * ARABIC_USABLE_WIDTH * ARABIC_WRAP_SAFETY
+    total_px = lines * ARABIC_USABLE_WIDTH * ARABIC_WRAP_SAFETY
     return max(1, int(total_px / px_per_char))
 
 
@@ -81,6 +108,13 @@ def adaptive_arabic_size(text: str) -> int:
     fs = total_px_budget / (PX_PER_CHAR_PER_FONTSIZE * length)
     fs = int(round(fs / 2) * 2)  # round to an even size
     return max(ARABIC_MIN_FONT_SIZE, min(ARABIC_MAX_FONT_SIZE, fs))
+
+
+def estimate_arabic_line_count(text: str, font_size: int) -> int:
+    """Estimates whether `text` will render as 1 or 2 lines at `font_size`
+    (Arabic is never allowed past ARABIC_MAX_LINES by construction)."""
+    one_line_capacity = arabic_line_capacity(font_size, lines=1)
+    return 1 if len(text) <= one_line_capacity else ARABIC_MAX_LINES
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -109,31 +143,48 @@ def sec_to_ass(s: float) -> str:
     return f"{h}:{m:02d}:{sec:05.2f}"
 
 
-def adaptive_english_size(text: str) -> int:
-    length = len(text)
-    if length <= 40:
-        return 56
-    if length <= 90:
-        return 46
-    return 38
-
-
 # Calibrated for Poppins at Fontsize=56 (~15.5px/char average across mixed
-# word lengths). Used only to decide whether a translation needs to be
-# split into multiple synced chunks like the Arabic track — normal-length
-# ayat are unaffected and keep the original two-line wrap behavior.
+# word lengths). Drives both the smooth adaptive sizing below and the
+# decision to split a translation into multiple synced chunks like the
+# Arabic track — normal-length ayat are unaffected and keep the original
+# two-line wrap behavior.
 EN_PX_PER_CHAR_PER_FONTSIZE = 15.5 / 56.0
 EN_MARGIN_L = 90
 EN_MARGIN_R = 90
 EN_USABLE_WIDTH = PLAY_RES_X - EN_MARGIN_L - EN_MARGIN_R
 EN_MAX_LINES = 2
 EN_WRAP_SAFETY = 0.90
+EN_MIN_FONT_SIZE = 38  # floor — never too small to read on a phone
+EN_MAX_FONT_SIZE = 58  # ceiling for short translations
 
 
-def english_line_capacity(font_size: int) -> int:
+def english_line_capacity(font_size: int, lines: int = EN_MAX_LINES) -> int:
     px_per_char = EN_PX_PER_CHAR_PER_FONTSIZE * font_size
-    total_px = EN_MAX_LINES * EN_USABLE_WIDTH * EN_WRAP_SAFETY
+    total_px = lines * EN_USABLE_WIDTH * EN_WRAP_SAFETY
     return max(1, int(total_px / px_per_char))
+
+
+def adaptive_english_size(text: str) -> int:
+    """
+    Smoothly scales translation font size between EN_MIN_FONT_SIZE and
+    EN_MAX_FONT_SIZE based on length, the same closed-form approach used
+    for Arabic — short ayat get a large, confident size and long ones
+    shrink gradually instead of jumping between a few fixed buckets.
+    """
+    length = len(text)
+    if length <= english_line_capacity(EN_MAX_FONT_SIZE):
+        return EN_MAX_FONT_SIZE
+    if length >= english_line_capacity(EN_MIN_FONT_SIZE):
+        return EN_MIN_FONT_SIZE
+    total_px_budget = EN_MAX_LINES * EN_USABLE_WIDTH * EN_WRAP_SAFETY
+    fs = total_px_budget / (EN_PX_PER_CHAR_PER_FONTSIZE * length)
+    fs = int(round(fs / 2) * 2)
+    return max(EN_MIN_FONT_SIZE, min(EN_MAX_FONT_SIZE, fs))
+
+
+def estimate_english_line_count(text: str, font_size: int) -> int:
+    one_line_capacity = english_line_capacity(font_size, lines=1)
+    return 1 if len(text) <= one_line_capacity else EN_MAX_LINES
 
 
 def wrap_to_two_lines(text: str, width: int) -> str:
@@ -144,6 +195,109 @@ def wrap_to_two_lines(text: str, width: int) -> str:
         # the adaptive font sizing above keeps this rare.
         lines = [lines[0], " ".join(lines[1:])]
     return r"\N".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SUBTITLE BLOCK LAYOUT — Arabic + translation centered as one unit
+# ══════════════════════════════════════════════════════════════════════════
+# Both lines are placed with explicit `\pos` (anchored top-center, \an8)
+# rather than relying on style-level MarginV. This lets us compute exact
+# pixel positions from each line's *real* estimated height, so the pair
+# always reads as one balanced, centered block — Arabic sitting in the
+# natural reading zone just above center, translation directly beneath it
+# with consistent breathing room — regardless of whether either line is
+# one or two lines long.
+
+# Safe zones: keep clear of platform chrome common to Instagram Reels,
+# Facebook Reels and YouTube Shorts (profile/caption overlays up top;
+# captions, sound title and engagement buttons near the bottom).
+SAFE_TOP_MARGIN = 210
+SAFE_BOTTOM_MARGIN = 300
+
+# Vertical center of the whole block. Slightly above the frame's exact
+# middle (0.5) so the Arabic line lands in the natural "easiest to read"
+# zone without ever needing to sit at the very top or bottom.
+BLOCK_CENTER_Y = int(PLAY_RES_Y * 0.47)
+
+# Fixed gap between the bottom of the Arabic block and the top of the
+# translation block.
+BLOCK_GAP = 26
+
+# Approximate line-height multipliers (font size -> px per line). Arabic
+# needs more vertical room than the nominal font size suggests because
+# Quranic tashkeel (vowel marks) extend above and below the baseline.
+ARABIC_LINE_HEIGHT_FACTOR = 1.45
+EN_LINE_HEIGHT_FACTOR = 1.30
+# Extra breathing room between wrapped lines within the same block.
+INTRA_BLOCK_LINE_GAP = 6
+
+
+def _block_height(font_size: int, n_lines: int, line_factor: float) -> int:
+    if not font_size or n_lines <= 0:
+        return 0
+    return int(font_size * line_factor * n_lines
+                + INTRA_BLOCK_LINE_GAP * max(0, n_lines - 1))
+
+
+def compute_block_positions(ar_font_size, ar_lines, en_font_size, en_lines):
+    """
+    Returns (arabic_top_y, english_top_y): the \\pos Y coordinates (top
+    edge, matching \\an8) for the Arabic and translation lines so that,
+    together, they form one block vertically centered on BLOCK_CENTER_Y
+    with BLOCK_GAP between them — clamped to stay within the top/bottom
+    safe zones without changing the internal spacing.
+    """
+    ar_h = _block_height(ar_font_size, ar_lines, ARABIC_LINE_HEIGHT_FACTOR)
+    en_h = _block_height(en_font_size, en_lines, EN_LINE_HEIGHT_FACTOR)
+    gap = BLOCK_GAP if (ar_h and en_h) else 0
+    total_h = ar_h + gap + en_h
+
+    block_top = BLOCK_CENTER_Y - total_h // 2
+    ar_top = block_top
+    en_top = ar_top + ar_h + gap
+
+    # Clamp to the top safe zone, shifting the whole block down together.
+    if ar_h and ar_top < SAFE_TOP_MARGIN:
+        shift = SAFE_TOP_MARGIN - ar_top
+        ar_top += shift
+        en_top += shift
+
+    # Clamp to the bottom safe zone, shifting the whole block up together.
+    bottom_edge = (en_top + en_h) if en_h else (ar_top + ar_h)
+    max_bottom = PLAY_RES_Y - SAFE_BOTTOM_MARGIN
+    if bottom_edge > max_bottom:
+        shift = bottom_edge - max_bottom
+        ar_top -= shift
+        en_top -= shift
+
+    return ar_top, en_top
+
+
+def _arabic_layout(ar_text: str):
+    """Returns (font_size, estimated_lines, will_be_chunked) for an ayah's
+    Arabic text, or (None, 0, False) if there is no Arabic text."""
+    if not ar_text:
+        return None, 0, False
+    size = adaptive_arabic_size(ar_text)
+    capacity = arabic_line_capacity(size)
+    chunked = len(ar_text) > capacity
+    # Chunked ayat are always rendered as full two-line blocks by
+    # construction (see build_arabic_events), so assume 2 lines for
+    # positioning — this keeps the block from jumping between chunks.
+    lines = ARABIC_MAX_LINES if chunked else estimate_arabic_line_count(ar_text, size)
+    return size, lines, chunked
+
+
+def _english_layout(en_text: str):
+    """Returns (font_size, estimated_lines, will_be_chunked) for an ayah's
+    translation, or (None, 0, False) if there is no translation text."""
+    if not en_text:
+        return None, 0, False
+    size = adaptive_english_size(en_text)
+    capacity = english_line_capacity(size)
+    chunked = len(en_text) > capacity
+    lines = EN_MAX_LINES if chunked else estimate_english_line_count(en_text, size)
+    return size, lines, chunked
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -176,11 +330,59 @@ def estimate_word_timings(text: str, duration: float) -> list:
     return timings
 
 
+# ── RTL karaoke ─────────────────────────────────────────────────────────
+# Unicode bidi control characters used to force correct right-to-left
+# rendering of the karaoke-tagged Arabic line. See _rtl_karaoke_wrap.
+_RLE = "\u202B"  # Right-to-Left Embedding
+_PDF = "\u202C"  # Pop Directional Formatting
+_RLM = "\u200F"  # Right-to-Left Mark
+
+
+def _rtl_karaoke_wrap(word_timings: list) -> str:
+    """
+    Builds an ASS karaoke string for Arabic text that highlights in true
+    right-to-left reading order, e.g. '{\\k37}word1 {\\k42}word2 ...'
+    wrapped so it actually *displays* right-to-left.
+
+    Why this is necessary: a plain `{\\kNN}word` sequence highlights in
+    the order the words appear in the underlying string (logical/reading
+    order) — word 1 first, word 2 second, etc. For Arabic that is already
+    the correct reading order (word 1 is the first word recited). The bug
+    reported ("karaoke behaves like English, left→right") happens at the
+    *rendering* stage, not the timing stage: each `{\\kNN}` override tag
+    interrupts Unicode's bidi paragraph analysis, and several ASS/libass
+    versions then fall back to treating the text as left-to-right by
+    default. The visible result is that both the word order and the
+    highlight sweep get flipped to look like English, even though the
+    underlying Arabic string and its \\k timings were never wrong.
+
+    The fix is to make the direction explicit instead of relying on
+    inference:
+      - The whole sequence is wrapped in RLE ... PDF (Right-to-Left
+        Embedding / Pop Directional Formatting), forcing the entire
+        paragraph into RTL layout regardless of the override tags inside
+        it.
+      - Each word is additionally prefixed with an RLM (Right-to-Left
+        Mark), so every run — including the ones immediately following a
+        `{\\kNN}` tag — is unambiguously anchored as RTL text on its own,
+        not just inherited from the paragraph.
+    The \\k timings themselves are untouched and still advance through the
+    string in logical order; only the display direction is corrected, so
+    word 1 now correctly renders on the right and lights up first, moving
+    right→left exactly as the ayah is recited. Nothing is reversed or
+    faked — this is the standards-compliant way to tell the renderer
+    "this text is RTL."
+    """
+    if not word_timings:
+        return ""
+    parts = [f"{{\\k{cs}}}{_RLM}{escape_ass(w)}" for w, cs in word_timings]
+    return _RLE + " ".join(parts) + _PDF
+
+
 def build_karaoke_text(text: str, duration: float) -> str:
-    """Builds an ASS karaoke string like '{\\k37}word1 {\\k42}word2 ...'."""
+    """Builds a right-to-left ASS karaoke string for a full ayah."""
     timings = estimate_word_timings(text, duration)
-    parts = [f"{{\\k{cs}}}{escape_ass(w)}" for w, cs in timings]
-    return " ".join(parts)
+    return _rtl_karaoke_wrap(timings)
 
 
 def chunk_words_by_capacity(words: list, capacity: int) -> list:
@@ -207,30 +409,35 @@ def chunk_words_by_capacity(words: list, capacity: int) -> list:
     return chunks
 
 
-def build_arabic_events(ar_text: str, duration: float, cursor: float, ar_font: str) -> list:
+def build_arabic_events(ar_text: str, duration: float, cursor: float,
+                         font_size: int, pos_y: int) -> list:
     """
     Returns a list of (start_sec, end_sec, ass_text) for the Arabic line of
     one ayah, relative to the overall subtitle timeline.
 
-    Short/medium ayat: a single event for the whole ayah (unchanged
-    behavior from before, just with calibrated sizing).
+    Short/medium ayat: a single event for the whole ayah.
 
     Very long ayat: split into multiple word-boundary-safe chunks, each
     capped at ARABIC_MAX_LINES lines, shown sequentially for the portion
     of the ayah's audio duration spanning that chunk's words — so nothing
-    is ever clipped and the Arabic block never grows into the English
-    track's safe zone.
+    is ever clipped and the Arabic block never grows into the
+    translation's safe zone.
+
+    `font_size` and `pos_y` are pre-computed by the caller (via
+    `_arabic_layout` / `compute_block_positions`) so every chunk of a
+    given ayah shares the same size and screen position — the block
+    stays put instead of jumping around while a long ayah plays.
     """
-    font_size = adaptive_arabic_size(ar_text)
     words = ar_text.split()
     capacity = arabic_line_capacity(font_size)
+    pos = f"\\an8\\pos({PLAY_RES_X // 2},{pos_y})"
 
     if len(ar_text) <= capacity:
         # Fits comfortably as a single two-line block.
         karaoke_body = build_karaoke_text(ar_text, duration)
         override = (
-            f"{{\\an8\\fad(250,150)\\fscx85\\fscy85"
-            f"\\t(0,180,\\fscx100\\fscy100)\\fs{font_size}}}"
+            f"{{{pos}\\fad(300,200)\\fscx94\\fscy94"
+            f"\\t(0,220,2,\\fscx100\\fscy100)\\blur2\\fs{font_size}}}"
         )
         return [(cursor, cursor + duration, override + karaoke_body)]
 
@@ -252,12 +459,10 @@ def build_arabic_events(ar_text: str, duration: float, cursor: float, ar_font: s
         else:
             chunk_end_sec = cursor + duration
         chunk_words = timings[i0:i1]
-        karaoke_body = " ".join(
-            f"{{\\k{cs}}}{escape_ass(w)}" for w, cs in chunk_words
-        )
+        karaoke_body = _rtl_karaoke_wrap(chunk_words)
         override = (
-            f"{{\\an8\\fad(200,120)\\fscx90\\fscy90"
-            f"\\t(0,150,\\fscx100\\fscy100)\\fs{font_size}}}"
+            f"{{{pos}\\fad(220,140)\\fscx96\\fscy96"
+            f"\\t(0,180,2,\\fscx100\\fscy100)\\blur2\\fs{font_size}}}"
         )
         events.append((chunk_start_sec, chunk_end_sec, override + karaoke_body))
 
@@ -268,40 +473,43 @@ def build_arabic_events(ar_text: str, duration: float, cursor: float, ar_font: s
     return events
 
 
-def build_english_events(en_text: str, duration: float, cursor: float, chunk_windows: list = None) -> list:
+def build_english_events(en_text: str, duration: float, cursor: float,
+                          font_size: int, pos_y: int) -> list:
     """
-    Returns a list of (start_sec, end_sec, ass_text) for the English line.
+    Returns a list of (start_sec, end_sec, ass_text) for the translation
+    line.
 
     If the translation fits within EN_MAX_LINES at the adaptive size, it is
-    shown as a single event for the full ayah duration (unchanged prior
-    behavior). If not, it is split at word boundaries into its own
-    capacity-driven chunks (independent of how many Arabic chunks exist,
-    since Arabic and English have different character densities) using the
-    same word-weighted timing approach as the Arabic karaoke track, so each
-    chunk is timed to roughly when those words are being recited and never
-    exceeds the two-line safe zone.
+    shown as a single event for the full ayah duration. If not, it is
+    split at word boundaries into its own capacity-driven chunks
+    (independent of how many Arabic chunks exist, since Arabic and English
+    have different character densities) using the same word-weighted
+    timing approach as the Arabic karaoke track, so each chunk is timed to
+    roughly when those words are being recited and never exceeds the
+    two-line safe zone.
 
-    `chunk_windows` is accepted for API symmetry with the Arabic side but
-    is no longer required for correctness.
+    `font_size` and `pos_y` are pre-computed by the caller so every chunk
+    shares the same size and screen position, staying locked directly
+    beneath the Arabic block.
     """
-    en_size = adaptive_english_size(en_text)
-    capacity = english_line_capacity(en_size)
+    capacity = english_line_capacity(font_size)
+    pos = f"\\an8\\pos({PLAY_RES_X // 2},{pos_y})"
 
     if len(en_text) <= capacity:
-        wrap_width = max(int(2600 / en_size), 18)
+        wrap_width = max(int(2600 / font_size), 18)
         en_wrapped = wrap_to_two_lines(escape_ass(en_text), wrap_width)
-        override = f"{{\\an2\\fad(300,200)\\fs{en_size}}}"
+        override = (
+            f"{{{pos}\\fad(320,220)\\fscx97\\fscy97"
+            f"\\t(0,240,2,\\fscx100\\fscy100)\\blur1\\fs{font_size}}}"
+        )
         return [(cursor, cursor + duration, override + en_wrapped)]
 
     # Too long for two lines even at the smallest adaptive size: chunk at
-    # word boundaries using the smallest size for visual consistency across
-    # chunks, timed via the same word-weighted distribution used for
-    # Arabic karaoke (a reasonable proxy for pacing given we don't have
-    # per-word translation alignment).
-    chunk_size = en_size
-    chunk_capacity = english_line_capacity(chunk_size)
+    # word boundaries, timed via the same word-weighted distribution used
+    # for Arabic karaoke (a reasonable proxy for pacing given we don't
+    # have per-word translation alignment).
     words = en_text.split()
-    ranges = chunk_words_by_capacity(words, chunk_capacity)
+    ranges = chunk_words_by_capacity(words, capacity)
 
     timings = estimate_word_timings(en_text, duration)
     word_starts_sec = []
@@ -315,14 +523,17 @@ def build_english_events(en_text: str, duration: float, cursor: float, chunk_win
         win_start = cursor + word_starts_sec[i0]
         win_end = cursor + (word_starts_sec[ranges[ci + 1][0]] if ci + 1 < len(ranges) else duration)
         chunk_text = " ".join(words[i0:i1])
-        wrap_width = max(int(2600 / chunk_size), 18)
+        wrap_width = max(int(2600 / font_size), 18)
         en_wrapped = wrap_to_two_lines(escape_ass(chunk_text), wrap_width)
-        override = f"{{\\an2\\fad(200,120)\\fs{chunk_size}}}"
+        override = (
+            f"{{{pos}\\fad(200,120)\\fscx98\\fscy98"
+            f"\\t(0,180,2,\\fscx100\\fscy100)\\blur1\\fs{font_size}}}"
+        )
         events.append((win_start, win_end, override + en_wrapped))
 
     log.info(
         "Long translation (%d chars) split into %d timed chunks at fs=%d",
-        len(en_text), len(events), chunk_size,
+        len(en_text), len(events), font_size,
     )
     return events
 
@@ -331,6 +542,14 @@ def build_english_events(en_text: str, duration: float, cursor: float, chunk_win
 # ASS FILE ASSEMBLY
 # ══════════════════════════════════════════════════════════════════════════
 
+# Colors (ASS format &HAABBGGRR):
+#   Arabic SecondaryColour = soft ivory/grey  (E8E8E8) — the "not yet
+#     recited" resting color, calm and readable on any background.
+#   Arabic PrimaryColour   = emerald          (10B981) — the karaoke
+#     highlight color a word switches to the instant it's recited.
+#   OutlineColour is a deep near-black for contrast on any footage;
+#   BackColour carries a soft, partially-transparent shadow (not a hard
+#   flat one) so the glow reads as premium rather than a cheap subtitle box.
 HEADER_TEMPLATE = """\
 [Script Info]
 ScriptType: v4.00+
@@ -342,8 +561,8 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Arabic,{ar_font},110,&H00FFFFFF,&H0000D7FF,&H001A1A1A,&H00000000,0,0,0,0,100,100,0,0,1,5,2,8,80,80,140,1
-Style: English,{en_font},56,&H00E8E8E8,&H00E8E8E8,&H001A1A1A,&H00000000,0,0,0,0,100,100,0,0,1,3,1,2,90,90,170,1
+Style: Arabic,{ar_font},110,&H0081B910,&H00E8E8E8,&H00141414,&H50000000,0,0,0,0,100,100,0,0,1,4,2,8,80,80,140,1
+Style: English,{en_font},56,&H00EDEDED,&H00EDEDED,&H00141414,&H60000000,0,0,0,0,100,100,0,0,1,3,1,8,90,90,170,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -359,10 +578,15 @@ def build_subtitles(
 ) -> None:
     """
     Writes a full ASS subtitle track:
-      - Arabic: karaoke word-highlight, pop-in animation, adaptive size, top-safe zone
-      - English: fade-in translation, adaptive size, bottom-safe zone
-    Both are capped at two lines and kept within safe margins so they never
-    collide with each other or run off the 1080x1920 canvas.
+      - Arabic: right-to-left karaoke word-highlight, gentle fade + scale
+        animation, adaptive size, positioned in the natural reading zone
+        just above screen center.
+      - Translation: fade-in, adaptive size, positioned directly beneath
+        the Arabic with consistent spacing.
+    Arabic + translation are laid out as a single centered block (see
+    compute_block_positions) and both are capped at two lines, so they
+    never collide with each other or run off the 1080x1920 canvas, and
+    stay clear of Reels/Shorts safe zones.
     """
     header = HEADER_TEMPLATE.format(
         res_x=PLAY_RES_X, res_y=PLAY_RES_Y,
@@ -373,16 +597,17 @@ def build_subtitles(
     cursor = 0.0
 
     for (surah, ayah), duration in zip(batch, audio_durations):
-        start = sec_to_ass(cursor)
-        end = sec_to_ass(cursor + duration)
-
         ar_text = get_ayah_text(arabic_data, surah, ayah)
         en_text = get_ayah_text(english_data, surah, ayah)
 
-        ar_chunk_windows = []
+        ar_size, ar_lines, _ = _arabic_layout(ar_text)
+        en_size, en_lines, _ = _english_layout(en_text)
+        ar_top, en_top = compute_block_positions(ar_size, ar_lines, en_size, en_lines)
+
         if ar_text:
-            ar_chunk_windows = build_arabic_events(ar_text, duration, cursor, ARABIC_FONT)
-            for chunk_start, chunk_end, ar_line in ar_chunk_windows:
+            for chunk_start, chunk_end, ar_line in build_arabic_events(
+                ar_text, duration, cursor, ar_size, ar_top
+            ):
                 events.append(
                     f"Dialogue: 1,{sec_to_ass(chunk_start)},{sec_to_ass(chunk_end)},"
                     f"Arabic,,0,0,0,,{ar_line}"
@@ -390,7 +615,7 @@ def build_subtitles(
 
         if en_text:
             for chunk_start, chunk_end, en_line in build_english_events(
-                en_text, duration, cursor, ar_chunk_windows
+                en_text, duration, cursor, en_size, en_top
             ):
                 events.append(
                     f"Dialogue: 0,{sec_to_ass(chunk_start)},{sec_to_ass(chunk_end)},"
