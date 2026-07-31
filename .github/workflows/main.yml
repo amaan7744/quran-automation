@@ -3,45 +3,53 @@ name: Quran Daily Upload
 on:
   schedule:
     - cron: "0 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+
+concurrency:
+  group: quran-daily-upload
+  cancel-in-progress: false
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+
     permissions:
-      contents: write  # Crucial for saving progress.json
+      contents: write
       actions: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Install FFmpeg and system deps
+      - name: Install FFmpeg and System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fontconfig
 
-      - name: Install fonts (DigitalKhatt IndoPak + Poppins)
+      - name: Install Fonts
         run: |
           mkdir -p ~/.fonts
-          # IndoPak-style Quran font (SIL OFL 1.1) — matches the traditional
-          # India/Pakistan/Bangladesh Mushaf script. See fonts/LICENSE-IndoPak.txt.
+
           curl -fsSL -o ~/.fonts/DigitalKhattIndoPak.otf \
-            https://github.com/DigitalKhatt/indopakfont/releases/download/v1.0.0-beta.1/indopak.otf
+          https://github.com/DigitalKhatt/indopakfont/releases/download/v1.0.0-beta.1/indopak.otf
+
           curl -fsSL -o ~/.fonts/Poppins-Regular.ttf \
-            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf
+          https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf
+
           curl -fsSL -o ~/.fonts/Poppins-SemiBold.ttf \
-            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf
+          https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf
+
           fc-cache -fv
-          fc-list | grep -i "digitalkhatt" || (echo "IndoPak font failed to install" && exit 1)
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Restore clip quality cache
+      - name: Restore Clip Cache
         uses: actions/cache@v4
         with:
           path: .cache/clips
@@ -57,45 +65,56 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python build_video.py
 
-      - name: Save and Push Progress
-        if: steps.build.outcome == 'success'
+      - name: Commit Progress
+        if: success()
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "github-actions[bot]"
-          git add progress.json
-          git commit -m "chore: update progress [skip ci]" || echo "No changes"
-          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
-          git pull --rebase origin main
-          git push origin main
+          git config user.email "action@github.com"
+          git config user.name "github-actions[bot]"
 
-      - name: Upload
-        if: steps.build.outcome == 'success'
+          if [ -f progress.json ]; then
+            git add progress.json
+          fi
+
+          git commit -m "chore: update progress [skip ci]" || echo "No changes"
+
+          git pull --rebase origin main || true
+
+          git push origin HEAD:main
+
+      - name: Upload Video
+        if: success()
         env:
-          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          META_ACCESS_TOKEN:     ${{ secrets.META_ACCESS_TOKEN }}
-          FACEBOOK_PAGE_ID:      ${{ secrets.FACEBOOK_PAGE_ID }}
-          INSTAGRAM_ACCOUNT_ID:  ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
         run: python upload.py
 
-      - name: Save upload history
+      - name: Save Upload History
         if: always()
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "github-actions[bot]"
-          git add upload_history.json
-          git commit -m "chore: update upload history [skip ci]" || echo "No changes"
-          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
-          git pull --rebase origin main
-          git push origin main || echo "Nothing to push"
+          git config user.email "action@github.com"
+          git config user.name "github-actions[bot]"
 
-      - name: Upload logs and metadata as artifacts
+          if [ -f upload_history.json ]; then
+            git add upload_history.json
+          fi
+
+          git commit -m "chore: update upload history [skip ci]" || echo "No changes"
+
+          git pull --rebase origin main || true
+
+          git push origin HEAD:main || echo "Nothing to push"
+
+      - name: Upload Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: run-artifacts
           path: |
-            logs/
+            logs/**
             video_metadata.json
+          if-no-files-found: ignore
           retention-days: 7
