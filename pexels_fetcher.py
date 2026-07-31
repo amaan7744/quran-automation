@@ -11,14 +11,34 @@ Deliberately simple, fast pipeline (no perceptual quality analysis):
      720x1280, shorter than MIN_CLIP_DURATION, or corrupted/unreadable
      (all checked with a single cheap ffprobe call — see quality_filter.py).
   4. Randomly select enough clips to cover the needed duration.
-  5. Trim each clip to a random 3-5s length.
-  6. Concatenate them together.
+  5. Trim each clip to a random 3-5s length AND normalize it to a
+     single common format (resolution, constant fps, pixel format,
+     SAR, timebase) — see NORMALIZATION note below.
+  6. Concatenate the now-identical clips together.
   7. Add smooth crossfades between clips.
   8. Use the result as the background for the Quran video.
 
-NOTE ON SOURCE: this pipeline uses the Pexels video API. Pinterest has no
-public API for searching/downloading third-party video content, so there
-is no "Pinterest pipeline" to swap in here.
+NORMALIZATION NOTE:
+Pexels clips arrive with mixed frame rates (24/25/30/60fps), mixed
+timebases, mixed sample aspect ratios, and sometimes non-yuv420p pixel
+formats. ffmpeg's `xfade` filter requires every input to share the exact
+same frame rate and timebase, or it fails outright (as opposed to
+silently reconciling them). Rather than trying to make `xfade` handle
+mismatched inputs, every clip is fully normalized to identical properties
+*before* it ever reaches the crossfade filter:
+  - scaled/cropped to VIDEO_WIDTH x VIDEO_HEIGHT
+  - resampled to a constant VIDEO_FPS via the `fps` filter (handles
+    24/25/30/60fps sources uniformly, duplicating/dropping frames as
+    needed instead of leaving variable frame timing in place)
+  - sample aspect ratio forced to 1:1 (`setsar=1`)
+  - pixel format forced to yuv420p
+  - encoded with `-fps_mode cfr` and an explicit, identical
+    `-video_track_timescale`, so every trimmed clip has the same
+    constant frame rate *and* the same container timebase
+Because normalization happens once per clip up front, `crossfade_concat`
+never needs to reconcile mismatched properties — by the time clips reach
+it, they are already identical, so xfade only has to do the actual
+cross-dissolve.
 """
 
 import random
@@ -37,6 +57,12 @@ from logging_utils import get_logger
 from quality_filter import is_used_before, mark_used, cached_path_for, validate_clip
 
 log = get_logger(__name__)
+
+# Fixed container timebase (in Hz) applied to every normalized clip so that
+# xfade sees identical timebases on all inputs, regardless of what the
+# source Pexels file used. 90000 is the standard MPEG-TS-style timescale
+# and divides evenly for all target fps values we care about (24/25/30/60).
+NORMALIZED_TIMESCALE = 90000
 
 
 class PexelsError(RuntimeError):
@@ -188,18 +214,39 @@ def collect_clips(total_duration: float, tmpdir: Path) -> list:
 
 def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
     """
-    Single fast ffmpeg pass: scale+crop to the output canvas and trim to
-    `duration` seconds. No motion effects, no analysis — just a clean cut
-    ready for crossfade concatenation.
+    Trims `src` to `duration` seconds and normalizes it to a single common
+    format so that every clip fed into crossfade_concat is guaranteed
+    identical on every property xfade cares about:
+
+      - VIDEO_WIDTH x VIDEO_HEIGHT (scale + center crop)
+      - constant VIDEO_FPS (the `fps` filter resamples 24/25/30/60fps
+        sources onto one constant frame rate, unlike `-r` alone which can
+        leave irregular frame timing in place)
+      - sample aspect ratio forced to 1:1 (setsar=1) so differing SAR
+        metadata from source clips can't produce a mismatched display size
+      - yuv420p pixel format (normalizes away 4:2:2/4:4:4/other formats)
+      - a fixed, identical container timebase (-video_track_timescale)
+        and constant frame rate muxing (-fps_mode cfr), so every trimmed
+        clip's timebase matches exactly, not just its frame rate
+
+    This is a real re-encode (not `-c copy`) specifically because only a
+    re-encode can rewrite fps/SAR/pixel format/timebase; xfade is never
+    relied upon to reconcile any of these.
     """
     vf = (
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},format=yuv420p"
+        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
+        f"fps={VIDEO_FPS},"
+        f"setsar=1,"
+        f"format=yuv420p"
     )
     cmd = [
         "ffmpeg", "-y", "-i", str(src),
         "-t", str(duration),
         "-vf", vf,
+        "-r", str(VIDEO_FPS),
+        "-fps_mode", "cfr",
+        "-video_track_timescale", str(NORMALIZED_TIMESCALE),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-an",
         str(dst),
@@ -215,7 +262,17 @@ def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
 
 def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
                       transition: float = TRANSITION_DURATION, fps: int = VIDEO_FPS) -> None:
-    """Joins normalized clips with simple xfade crossfade transitions."""
+    """
+    Joins already-normalized clips with xfade crossfade transitions.
+
+    By this point every clip in clip_paths has already been produced by
+    trim_and_normalize(), so all inputs share identical resolution, fps,
+    SAR, pixel format, and timebase. xfade is only asked to do the actual
+    cross-dissolve here — no scaling, fps conversion, or format handling
+    happens in this filter graph, since doing that work twice (once in
+    normalization, once implicitly via xfade) is exactly what caused the
+    "frame rate does not match" / "timebase mismatch" failures.
+    """
     if len(clip_paths) == 1:
         cmd = ["ffmpeg", "-y", "-i", str(clip_paths[0]), "-c", "copy", str(out_path)]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -245,6 +302,8 @@ def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
         "-filter_complex", filter_complex,
         "-map", "[vout]",
         "-r", str(fps),
+        "-fps_mode", "cfr",
+        "-video_track_timescale", str(NORMALIZED_TIMESCALE),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-an",
         str(out_path),
@@ -261,8 +320,8 @@ def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
 
 def build_background(total_duration: float, tmpdir: Path, out_path: Path) -> None:
     """
-    Full pipeline: search -> validate -> select -> trim -> crossfade concat
-    -> trim to exact audio duration.
+    Full pipeline: search -> validate -> select -> trim+normalize ->
+    crossfade concat -> trim to exact audio duration.
     """
     clips = collect_clips(total_duration, tmpdir)
 
