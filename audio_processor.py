@@ -8,38 +8,54 @@ fade in/out. Duration is never touched, so sync with the (externally
 timed) subtitles is never affected — only tone and levels change.
 
 Processing chain (in order):
-  1. High-pass filter (two cascaded stages) — removes sub-90Hz rumble/
+  1. Denoise            — a light, conservative spectral denoiser that
+     lifts the noise floor (room hiss, handheld-mic self-noise, faint
+     background hum) without introducing the "underwater"/warbly
+     artifacts that aggressive noise reduction causes. Intentionally
+     mild: this is cleanup, not restoration.
+  2. High-pass filter (two cascaded stages) — removes sub-90Hz rumble/
      handling noise that sits below the reciter's vocal fundamental,
      without thinning the voice. A single 12dB/oct stage at 45Hz left a
      soft shoulder of low-end mud between ~45-90Hz; a firm 50Hz stage
      plus a gentle extra 90Hz trim clears that region cleanly.
-  2. Warmth EQ           — a small, fairly narrow low-mid lift for body/
+  3. Warmth EQ           — a small, fairly narrow low-mid lift for body/
      warmth, paired with a small wide cut just above it to stop the
      naturally dominant low-mid band (this is where most of a reciter's
      vocal energy already lives) from building into mud once compression
      and makeup gain stack on top of it.
-  3. Presence EQ         — a small, broad lift in the upper-mids for
+  4. Presence EQ         — a small, broad lift in the upper-mids for
      clarity/intelligibility on phone speakers, plus a very gentle high
      shelf for "air"/openness on genuinely wideband sources. The shelf is
      a no-op on heavily compressed/lossy sources (there's nothing left up
      there to lift) — it only helps when the source actually has it.
-  4. Compressor          — gentle dynamic control tuned for spoken-word
-     pacing (slow attack/release, soft knee) so tajweed dynamics, breaths
-     and pauses stay natural instead of being flattened, pumped, or
-     audibly "grabbed" at the onset.
-  5. Loudnorm (2-pass)   — the chain above is measured first, then
+  5. Harmonic exciter    — a subtle, mostly-dry blend of upper harmonics.
+     This is what gives professionally mastered voice tracks their
+     "expensive"/open sheen, and it works differently from EQ: instead of
+     boosting an existing frequency band (which risks harshness), it adds
+     new, quieter harmonic content derived from the signal itself.
+  6. Parallel compression — the original ("dry") signal is blended with a
+     more heavily compressed ("wet") copy of itself, rather than sending
+     100% of the signal through one compressor. This is the classic
+     mastering-bus trick for adding density/loudness-readiness/"glue"
+     while the dry path keeps the natural transients and breath dynamics
+     that a single hard compressor would flatten.
+  7. De-esser            — targeted, dynamic reduction of sibilance
+     ("s"/"sh" harshness) in the 5-8kHz region. Necessary specifically
+     because the presence EQ and exciter both add upper-mid/high energy,
+     which otherwise makes sibilance more prominent than in the source.
+  8. Loudnorm (2-pass)   — the chain above is measured first, then
      applied as a single linear gain move to the target LUFS. This is
      the standard "accurate" loudnorm mode: it avoids the audible
      gain-riding/pumping that the single-pass dynamic mode can produce,
      at the cost of one extra (cheap, encode-free) analysis pass.
-  6. Limiter              — a true-peak safety net with a true-peak
+  9. Limiter              — a true-peak safety net with a true-peak
      ceiling below the platforms' own encoders (see AUDIO_TRUE_PEAK/
      LIMITER_CEILING) to avoid inter-sample clipping after re-encoding
      by Instagram/YouTube/Facebook, with a release time slow enough that
      gain recovery after a peak isn't audible as "breathing."
-  7. Fade in/out, using perceptually-smooth curves (quarter-sine in,
-     half-sine out) instead of a linear ramp, so neither end of the clip
-     reads as an abrupt on/off switch.
+  10. Fade in/out, using perceptually-smooth curves (quarter-sine in,
+      half-sine out) instead of a linear ramp, so neither end of the clip
+      reads as an abrupt on/off switch.
 
 None of these steps alter pitch, formants, or the reciter's natural
 timbre — this is level and tone shaping only, not voice modification.
@@ -79,16 +95,29 @@ log = get_logger(__name__)
 LIMITER_CEILING = 0.891
 
 
-def _pre_dynamics_chain() -> str:
+def _pre_dynamics_graph(in_label: str, out_label: str) -> str:
     """
-    The tone-shaping + dynamics portion of the chain, shared by both the
-    loudnorm measurement pass and the final render pass so the two can
-    never drift out of sync with each other.
+    The tone-shaping + dynamics portion of the chain, as a filter_complex
+    graph fragment. Shared by both the loudnorm measurement pass and the
+    final render pass so the two can never drift out of sync with each
+    other.
+
+    Takes the graph from `in_label` (e.g. "[0:a]") through denoise, EQ,
+    exciter, parallel compression and de-essing, and leaves the result
+    on `out_label` (e.g. "[shaped]"), ready for loudnorm/limiter/fades.
 
     All gains here are intentionally small — this is meant to be heard
     as "clean and natural," not "processed."
     """
     return (
+        f"{in_label}"
+        # Light spectral denoise: raises the noise floor gently (nr=8,
+        # a conservative reduction amount) and only treats material below
+        # -40dB as noise (nf=-40), so it cleans handheld-mic hiss/room
+        # tone without touching the reciter's voice or breaths, and
+        # without the "underwater" artifacting that aggressive settings
+        # cause.
+        "afftdn=nr=8:nf=-40:tn=1,"
         # Rumble/handling-noise removal, in two cascaded stages rather
         # than one. A single 45Hz/12dB-per-octave stage still leaves a
         # soft shoulder of low-end energy between roughly 45-90Hz. A
@@ -120,24 +149,44 @@ def _pre_dynamics_chain() -> str:
         # high-quality recording a touch of open clarity without ever
         # approaching brightness or harshness.
         "treble=f=9000:width_type=o:width=1.0:g=1.0,"
-        # Gentle leveling: slow attack/release preserves tajweed
-        # dynamics, breaths and natural pauses; a soft knee (instead of
-        # the default hard knee) makes the compressor's onset smooth and
-        # inaudible rather than an audible "grab" on louder emphasis.
-        "acompressor=threshold=-20dB:ratio=2.2:attack=25:release=320:knee=6:makeup=1"
+        # Harmonic exciter, kept deliberately subtle (amount=0.6, mostly
+        # dry blend): adds a touch of upper-harmonic "shimmer" rather
+        # than boosting an existing band, which is what gives a
+        # professionally mastered voice its open/expensive character
+        # without adding harshness the way another EQ boost would.
+        "aexciter=amount=0.6:drive=8.5:blend=-6,"
+        f"asplit=2[{out_label}_dry][{out_label}_presplit];"
+        # Parallel ("New York") compression: the wet path is squeezed
+        # noticeably harder than a single serial compressor would be
+        # (lower threshold, higher ratio), because it's only ever heard
+        # blended underneath the dry signal. This adds density/glue and
+        # loudness-readiness while the dry path preserves the reciter's
+        # natural transients, breaths and pauses untouched.
+        f"[{out_label}_presplit]acompressor=threshold=-28dB:ratio=4:attack=15:release=280:knee=8:makeup=3[{out_label}_wet];"
+        f"[{out_label}_dry][{out_label}_wet]amix=inputs=2:weights=1.0 0.5:normalize=0,"
+        # De-esser: targeted, dynamic reduction in the sibilance range.
+        # Necessary here specifically because the presence lift and the
+        # exciter above both add upper-mid/high-frequency energy, which
+        # otherwise makes "s"/"sh" sounds more prominent than in the
+        # source recording.
+        f"deesser=i=0.4:m=0.5:f=0.5:s=o[{out_label}]"
     )
 
 
-def _measure_loudness(src: Path, pre_chain: str, target_lufs: float, target_tp: float):
+def _measure_loudness(src: Path, pre_graph: str, target_lufs: float, target_tp: float):
     """
-    First pass: runs the tone/dynamics chain + loudnorm in measurement
+    First pass: runs the tone/dynamics graph + loudnorm in measurement
     mode (no output file) to get the real input loudness stats. Returns
     the parsed stats dict, or None if measurement/parsing fails (caller
     falls back to single-pass dynamic loudnorm so mastering never breaks
     the pipeline over this).
     """
-    af = f"{pre_chain},loudnorm=I={target_lufs}:TP={target_tp}:LRA=7:print_format=json"
-    cmd = ["ffmpeg", "-y", "-i", str(src), "-af", af, "-f", "null", "-"]
+    filter_complex = (
+        f"{pre_graph};"
+        f"[shaped]loudnorm=I={target_lufs}:TP={target_tp}:LRA=7:print_format=json[out]"
+    )
+    cmd = ["ffmpeg", "-y", "-i", str(src), "-filter_complex", filter_complex,
+           "-map", "[out]", "-f", "null", "-"]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", result.stderr, re.S)
@@ -161,20 +210,11 @@ def master_audio(src: Path, dst: Path, total_duration: float) -> None:
     remains valid.
     """
     fade_out_start = max(total_duration - AUDIO_FADE_OUT, 0)
-    pre_chain = _pre_dynamics_chain()
+    pre_graph = _pre_dynamics_graph(in_label="[0:a]", out_label="shaped")
 
-    stats = _measure_loudness(src, pre_chain, AUDIO_TARGET_LUFS, AUDIO_TRUE_PEAK)
+    stats = _measure_loudness(src, pre_graph, AUDIO_TARGET_LUFS, AUDIO_TRUE_PEAK)
 
     if stats:
-        # Accurate mode: apply the measured stats as a single linear gain
-        # move, rather than the dynamic (gain-riding) algorithm. This is
-        # the cleaner-sounding option and is what "print_format=json"
-        # measurement passes exist to feed. LRA=7 targets a tighter,
-        # more confidently "broadcast-consistent" dynamic range than the
-        # generic default of 11, while still leaving real headroom for
-        # natural pauses and emphasis (unlike the reference clip's
-        # measured 2.9 LRA, which reflects a short WhatsApp-compressed
-        # sample rather than a realistic target for a full reel).
         loudnorm = (
             f"loudnorm=I={AUDIO_TARGET_LUFS}:TP={AUDIO_TRUE_PEAK}:LRA=7:"
             f"measured_I={stats['input_i']}:measured_TP={stats['input_tp']}:"
@@ -182,28 +222,25 @@ def master_audio(src: Path, dst: Path, total_duration: float) -> None:
             f"offset={stats.get('target_offset', 0)}:linear=true:print_format=summary"
         )
     else:
-        # Fallback: single-pass dynamic loudnorm (previous behavior).
         loudnorm = f"loudnorm=I={AUDIO_TARGET_LUFS}:TP={AUDIO_TRUE_PEAK}:LRA=7:print_format=summary"
 
-    af = (
-        f"{pre_chain},"
-        f"{loudnorm},"
-        # Release lengthened slightly from 80ms to 100ms so gain recovery
-        # after a limited peak isn't perceptible as "breathing"; attack
-        # stays fast (5ms) since that's what reliably catches true peaks
-        # before platform re-encoding.
+    filter_complex = (
+        f"{pre_graph};"
+        f"[shaped]{loudnorm},"
         f"alimiter=limit={LIMITER_CEILING}:attack=5:release=100,"
-        # Perceptually-smooth fade curves: loudness is perceived roughly
-        # logarithmically, so a linear ramp (the previous default) can
-        # read as an abrupt on/off rather than a smooth rise/tail.
         f"afade=t=in:st=0:d={AUDIO_FADE_IN}:curve=qsin,"
-        f"afade=t=out:st={fade_out_start:.2f}:d={AUDIO_FADE_OUT}:curve=hsin"
+        f"afade=t=out:st={fade_out_start:.2f}:d={AUDIO_FADE_OUT}:curve=hsin[out]"
     )
 
     cmd = [
         "ffmpeg", "-y", "-i", str(src),
-        "-af", af,
-        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
+        # 256k + the two-loop coder gives a cleaner final encode than the
+        # default fast/short-term coder, worth the modest extra encode
+        # time for a "premium" master; 48kHz is already full quality for
+        # a voice-only source.
+        "-c:a", "aac", "-b:a", "256k", "-aac_coder", "twoloop", "-ar", "48000",
         str(dst),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
