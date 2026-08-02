@@ -5,26 +5,44 @@ Fetches simple, good-looking vertical nature footage from Pexels and
 assembles it into a single background video for the Quran video.
 
 Pipeline:
-  1. Search Pexels for nature videos.
+  1. Pick ONE visual theme (forest / mountain / ocean / winter /
+     sky-and-night) for this reel and search Pexels using only that
+     theme's cinematic queries — see THEME SELECTION note below. This
+     keeps every clip in a reel visually related instead of jumping
+     between unrelated environments.
   2. Download vertical videos only.
   3. Reject a downloaded clip if it's not vertical, below 720x1280,
      shorter than MIN_CLIP_DURATION, or corrupted/unreadable (all
      checked with a single cheap ffprobe call — see quality_filter.py).
-  4. HUMAN FILTER (mandatory, fully automatic — see HUMAN FILTER note
+  4. CONTENT FILTER (mandatory, fully automatic — see HUMAN FILTER note
      below): sample multiple frames across the whole clip and run them
-     through a person detector. Any detection anywhere in the clip
+     through a detector for people AND vehicles/transportation (cars,
+     boats, bikes, buses, etc.), since Pexels "nature" results
+     regularly include both. Any detection anywhere in the clip
      rejects it outright. No human review, no approval step — a
      rejected clip is simply discarded and the next candidate is tried,
      automatically, until enough clean clips are collected.
-  5. Randomly select enough human-free clips to cover the needed
-     duration, pulling additional search rounds automatically if the
-     first batch isn't enough (see MAX_GATHER_ROUNDS).
-  6. Trim each clip to a random 3-5s length AND normalize it to a
-     single common format (resolution, constant fps, pixel format,
-     SAR, timebase) — see NORMALIZATION note below.
-  7. Concatenate the now-identical clips together.
-  8. Add smooth crossfades between clips.
+  5. Randomly select enough clean clips to cover the needed duration,
+     pulling additional search rounds within the SAME theme
+     automatically if the first batch isn't enough (see
+     MAX_GATHER_ROUNDS).
+  6. Trim each clip to a random 3-5s length, apply a subtle unified
+     color grade, AND normalize it to a single common format
+     (resolution, constant fps, pixel format, SAR, timebase) — see
+     NORMALIZATION note below.
+  7. Concatenate the now-identical, color-matched clips together.
+  8. Add short, subtle crossfades between clips (~250-400ms).
   9. Use the result as the background for the Quran video.
+
+THEME SELECTION NOTE:
+Each reel should read as one intentional environment, not a stitched-
+together mix of forest + ocean + desert clips. THEMED_QUERIES in
+config.py groups cinematic search terms by mood. collect_clips() picks
+one theme at random and stays with it across every search round for
+that reel; it only reaches into a second theme as a last-resort
+fallback if the first theme genuinely can't fill the needed duration
+(logged clearly when this happens, since it's the exception, not the
+norm).
 
 HUMAN FILTER NOTE:
 NO HUMAN MAY EVER APPEAR IN THE BACKGROUND — not even for one frame.
@@ -69,10 +87,11 @@ from pathlib import Path
 import requests
 
 from config import (
-    PEXELS_API_KEY, PEXELS_SEARCH_URL, NATURE_QUERIES, CLIPS_PER_QUERY,
+    PEXELS_API_KEY, PEXELS_SEARCH_URL, THEMED_QUERIES, CLIPS_PER_QUERY,
     QUERIES_PER_RUN, DURATION_BUFFER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
     CLIP_TRIM_MIN, CLIP_TRIM_MAX, VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS,
-    TRANSITION_DURATION,
+    TRANSITION_DURATION, GRADE_CONTRAST, GRADE_SATURATION, GRADE_BRIGHTNESS,
+    GRADE_SHADOW_WARMTH, GRADE_HIGHLIGHT_WARMTH,
 )
 from logging_utils import get_logger
 from quality_filter import is_used_before, mark_used, cached_path_for, validate_clip
@@ -151,8 +170,17 @@ def search_pexels(query: str, count: int, session: requests.Session) -> list:
     return candidates
 
 
-def gather_candidates() -> list:
-    queries = random.sample(NATURE_QUERIES, k=min(QUERIES_PER_RUN, len(NATURE_QUERIES)))
+def pick_theme() -> tuple:
+    """Picks one random visual theme and returns (theme_name, query_list)."""
+    theme_name = random.choice(list(THEMED_QUERIES.keys()))
+    return theme_name, THEMED_QUERIES[theme_name]
+
+
+def gather_candidates(query_pool: list) -> list:
+    """Searches Pexels using queries drawn only from `query_pool` (a single
+    theme's cinematic query list), so every candidate returned stays within
+    one visual mood."""
+    queries = random.sample(query_pool, k=min(QUERIES_PER_RUN, len(query_pool)))
     all_candidates = []
     with requests.Session() as session:
         for q in queries:
@@ -222,7 +250,7 @@ def _evaluate_candidate(candidate: dict, tmpdir: Path):
         # let unscreened footage through. Fail loudly instead.
         raise
     if has_person:
-        log.info("  Rejected clip %s: contains a person", candidate["id"])
+        log.info("  Rejected clip %s: contains a person or vehicle", candidate["id"])
         path.unlink(missing_ok=True)
         # Marked as used so it's never re-downloaded/re-scanned by a
         # future run — same dedup mechanism as a normally-consumed clip.
@@ -244,44 +272,59 @@ def collect_clips(total_duration: float, tmpdir: Path) -> list:
     pairs.
 
     Fully automatic end to end: if one search round doesn't turn up
-    enough usable clips (e.g. an unusually people-heavy batch), it
-    automatically pulls another round of candidates and keeps going —
-    up to MAX_GATHER_ROUNDS — with no manual intervention.
+    enough usable clips (e.g. an unusually people/vehicle-heavy batch),
+    it automatically pulls another round of candidates from the SAME
+    theme and keeps going — up to MAX_GATHER_ROUNDS — with no manual
+    intervention. Stays on one visual theme throughout so the reel
+    reads as one cohesive environment; only falls back to a second
+    theme if the first one genuinely can't fill the needed duration.
     """
     needed = total_duration * DURATION_BUFFER
     selected = []
     accumulated = 0.0
     tried_ids = set()
 
-    for round_num in range(1, MAX_GATHER_ROUNDS + 1):
+    theme_name, theme_queries = pick_theme()
+    log.info("Visual theme for this reel: %s", theme_name)
+    remaining_themes = [t for t in THEMED_QUERIES if t != theme_name]
+
+    round_num = 0
+    while round_num < MAX_GATHER_ROUNDS:
+        round_num += 1
         if accumulated >= needed:
             break
 
-        candidates = [c for c in gather_candidates() if c["id"] not in tried_ids]
+        candidates = [c for c in gather_candidates(theme_queries) if c["id"] not in tried_ids]
         if not candidates:
-            if round_num == 1:
-                raise PexelsError("Pexels returned no new candidates. Check API key/quota or query list.")
-            log.info("Round %d: no new candidates found, stopping search early", round_num)
-            break
+            log.info("Round %d (%s): no new candidates found", round_num, theme_name)
+        else:
+            log.info("Round %d (%s): evaluating %d candidates (%.1fs / %.1fs collected so far)",
+                      round_num, theme_name, len(candidates), accumulated, needed)
+            for candidate in candidates:
+                if accumulated >= needed:
+                    break
+                tried_ids.add(candidate["id"])
+                result = _evaluate_candidate(candidate, tmpdir)
+                if result is None:
+                    continue
+                path, trim_duration = result
+                selected.append((path, trim_duration))
+                accumulated += trim_duration
 
-        log.info("Round %d: evaluating %d candidates (%.1fs / %.1fs collected so far)",
-                  round_num, len(candidates), accumulated, needed)
-
-        for candidate in candidates:
-            if accumulated >= needed:
-                break
-            tried_ids.add(candidate["id"])
-            result = _evaluate_candidate(candidate, tmpdir)
-            if result is None:
-                continue
-            path, trim_duration = result
-            selected.append((path, trim_duration))
-            accumulated += trim_duration
+        # Last-resort fallback: the chosen theme couldn't fill the reel on
+        # its own even after every round. Switch to one more theme rather
+        # than failing the whole run — logged clearly since visual
+        # consistency is being relaxed as an exception, not the default.
+        if accumulated < needed and round_num >= MAX_GATHER_ROUNDS and remaining_themes:
+            theme_name = remaining_themes.pop(random.randrange(len(remaining_themes)))
+            theme_queries = THEMED_QUERIES[theme_name]
+            log.warning("Primary theme couldn't fill the reel; falling back to theme: %s", theme_name)
+            round_num = 0
 
     if not selected:
         raise PexelsError(
             "No usable clips: every downloaded candidate was invalid, corrupted, "
-            "unreadable, or contained a person."
+            "unreadable, or contained a person/vehicle."
         )
 
     random.shuffle(selected)
@@ -311,13 +354,20 @@ def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
 
     This is a real re-encode (not `-c copy`) specifically because only a
     re-encode can rewrite fps/SAR/pixel format/timebase; xfade is never
-    relied upon to reconcile any of these.
+    relied upon to reconcile any of these. The same re-encode is also
+    used to bake in a subtle, identical color grade (see GRADE_* in
+    config.py) on every clip, so footage pulled from different Pexels
+    sources within a theme doesn't visibly jump between warm/cold or
+    flat/saturated looks once concatenated.
     """
     vf = (
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
         f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
         f"fps={VIDEO_FPS},"
         f"setsar=1,"
+        f"eq=contrast={GRADE_CONTRAST}:saturation={GRADE_SATURATION}:brightness={GRADE_BRIGHTNESS},"
+        f"colorbalance=rs={GRADE_SHADOW_WARMTH}:bs={-GRADE_SHADOW_WARMTH}:"
+        f"rh={GRADE_HIGHLIGHT_WARMTH}:bh={-GRADE_HIGHLIGHT_WARMTH},"
         f"format=yuv420p"
     )
     cmd = [
