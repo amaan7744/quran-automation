@@ -13,11 +13,16 @@ Processing chain (in order):
      background hum) without introducing the "underwater"/warbly
      artifacts that aggressive noise reduction causes. Intentionally
      mild: this is cleanup, not restoration.
-  2. High-pass filter (two cascaded stages) — removes sub-90Hz rumble/
-     handling noise that sits below the reciter's vocal fundamental,
-     without thinning the voice. A single 12dB/oct stage at 45Hz left a
-     soft shoulder of low-end mud between ~45-90Hz; a firm 50Hz stage
-     plus a gentle extra 90Hz trim clears that region cleanly.
+  2. High-pass filter (single stage) — removes sub-70Hz rumble/handling
+     noise. An earlier version of this chain cascaded two stages (50Hz
+     2-pole + 90Hz 1-pole), which combine into an effective ~18dB/octave
+     rolloff reaching well up into the 90-120Hz range — exactly where a
+     mid-to-low register reciter's vocal fundamental and chest resonance
+     live, thinning out the "warm/deep" quality this mastering is
+     supposed to add. A single 12dB/octave stage at 70Hz clears rumble
+     and handling noise just as effectively for a voice-only source
+     (there's no bass instrument to protect against) while leaving the
+     entire vocal fundamental and its harmonics untouched.
   3. Warmth EQ           — a small, fairly narrow low-mid lift for body/
      warmth, paired with a small wide cut just above it to stop the
      naturally dominant low-mid band (this is where most of a reciter's
@@ -25,14 +30,20 @@ Processing chain (in order):
      and makeup gain stack on top of it.
   4. Presence EQ         — a small, broad lift in the upper-mids for
      clarity/intelligibility on phone speakers, plus a very gentle high
-     shelf for "air"/openness on genuinely wideband sources. The shelf is
-     a no-op on heavily compressed/lossy sources (there's nothing left up
-     there to lift) — it only helps when the source actually has it.
+     shelf for "air"/openness on genuinely wideband sources. Kept
+     deliberately gentle and broad (not peaky) — this band is also where
+     harshness and sibilance live, and the goal is clarity, not an
+     obviously "processed" edge. The shelf is a no-op on heavily
+     compressed/lossy sources (there's nothing left up there to lift) —
+     it only helps when the source actually has it.
   5. Harmonic exciter    — a subtle, mostly-dry blend of upper harmonics.
-     This is what gives professionally mastered voice tracks their
-     "expensive"/open sheen, and it works differently from EQ: instead of
-     boosting an existing frequency band (which risks harshness), it adds
-     new, quieter harmonic content derived from the signal itself.
+     Used sparingly (low amount, mostly-dry blend) because it's the
+     filter most likely to tip a "premium/open" voice into an
+     "artificial/metallic" one if pushed — it works differently from EQ:
+     instead of boosting an existing frequency band, it adds new,
+     quieter harmonic content derived from the signal itself. Like the
+     air shelf, it has diminishing returns on a heavily transcoded
+     source, since there's less genuine harmonic detail to draw from.
   6. Parallel compression — the original ("dry") signal is blended with a
      more heavily compressed ("wet") copy of itself, rather than sending
      100% of the signal through one compressor. This is the classic
@@ -40,9 +51,11 @@ Processing chain (in order):
      while the dry path keeps the natural transients and breath dynamics
      that a single hard compressor would flatten.
   7. De-esser            — targeted, dynamic reduction of sibilance
-     ("s"/"sh" harshness) in the 5-8kHz region. Necessary specifically
-     because the presence EQ and exciter both add upper-mid/high energy,
-     which otherwise makes sibilance more prominent than in the source.
+     ("s"/"sh" harshness) in the 5-8kHz region. Arabic recitation carries
+     a lot of inherently sibilant content (seen/sheen/saad/zay) even on
+     an untouched source, so some de-essing earns its place regardless;
+     it's tuned gently here since the presence EQ and exciter above are
+     both kept low enough that they're no longer the main driver of it.
   8. Loudnorm (2-pass)   — the chain above is measured first, then
      applied as a single linear gain move to the target LUFS. This is
      the standard "accurate" loudnorm mode: it avoids the audible
@@ -118,15 +131,14 @@ def _pre_dynamics_graph(in_label: str, out_label: str) -> str:
         # without the "underwater" artifacting that aggressive settings
         # cause.
         "afftdn=nr=8:nf=-40:tn=1,"
-        # Rumble/handling-noise removal, in two cascaded stages rather
-        # than one. A single 45Hz/12dB-per-octave stage still leaves a
-        # soft shoulder of low-end energy between roughly 45-90Hz. A
-        # firmer 50Hz stage clears the floor decisively (well below any
-        # reciter's vocal fundamental), and a gentle extra 90Hz stage
-        # trims the remaining shoulder without touching the fundamental
-        # itself.
-        "highpass=f=50:poles=2,"
-        "highpass=f=90:poles=1,"
+        # Rumble/handling-noise removal. A single, well-placed 12dB/octave
+        # stage at 70Hz clears sub-sonic noise cleanly for a voice-only
+        # source (no bass instrument to protect against), while staying
+        # safely below the fundamental of even a low/mid-register
+        # reciter's voice — an earlier two-stage version (50Hz 2-pole +
+        # 90Hz 1-pole) combined into a steeper rolloff that reached into
+        # the 90-120Hz range and measurably thinned out warmth/depth.
+        "highpass=f=70:poles=2,"
         # Warmth: a small, fairly narrow lift in the low-mids (body/chest
         # resonance). Kept narrower and slightly lower gain than a broad
         # boost, since a reciter's vocal fundamental already carries most
@@ -140,21 +152,27 @@ def _pre_dynamics_graph(in_label: str, out_label: str) -> str:
         # here. This keeps "warm" from sliding into "muddy."
         "equalizer=f=400:t=q:w=1.5:g=-1.0,"
         # Presence: a small, broad lift in the upper-mids for
-        # intelligibility on phone speakers, kept subtle to avoid any
-        # hint of harshness or sibilance exaggeration.
-        "equalizer=f=4000:t=q:w=1.0:g=1.5,"
+        # intelligibility on phone speakers. Kept low-gain and broad
+        # (wide bandwidth, not a narrow peak) — a peakier lift here reads
+        # as "papery"/harsh on a recitation and compounds with the
+        # exciter below into exactly the processed/edgy character this
+        # master is meant to avoid.
+        "equalizer=f=4000:t=q:w=0.8:g=1.0,"
         # Air/openness: a very gentle high shelf. This is a genuine no-op
         # on a heavily compressed or previously lossy-transcoded source
         # (there's nothing left up there to lift), but gives a real,
         # high-quality recording a touch of open clarity without ever
         # approaching brightness or harshness.
         "treble=f=9000:width_type=o:width=1.0:g=1.0,"
-        # Harmonic exciter, kept deliberately subtle (amount=0.6, mostly
-        # dry blend): adds a touch of upper-harmonic "shimmer" rather
-        # than boosting an existing band, which is what gives a
-        # professionally mastered voice its open/expensive character
-        # without adding harshness the way another EQ boost would.
-        "aexciter=amount=0.6:drive=8.5:blend=-6,"
+        # Harmonic exciter, kept deliberately subtle (amount=0.35, mostly
+        # dry blend at -9dB): adds a light touch of upper-harmonic
+        # "shimmer" rather than boosting an existing band. The original
+        # amount=0.6/drive=8.5/blend=-6dB setting was audibly on the edge
+        # of "processed" — this is voice-only content with no other
+        # instruments to hide behind, so any hint of synthetic harmonic
+        # buildup is immediately noticeable. Turned down to where it's
+        # felt as openness rather than heard as an effect.
+        "aexciter=amount=0.35:drive=6.0:blend=-9,"
         f"asplit=2[{out_label}_dry][{out_label}_presplit];"
         # Parallel ("New York") compression: the wet path is squeezed
         # noticeably harder than a single serial compressor would be
@@ -165,11 +183,11 @@ def _pre_dynamics_graph(in_label: str, out_label: str) -> str:
         f"[{out_label}_presplit]acompressor=threshold=-28dB:ratio=4:attack=15:release=280:knee=8:makeup=3[{out_label}_wet];"
         f"[{out_label}_dry][{out_label}_wet]amix=inputs=2:weights=1.0 0.5:normalize=0,"
         # De-esser: targeted, dynamic reduction in the sibilance range.
-        # Necessary here specifically because the presence lift and the
-        # exciter above both add upper-mid/high-frequency energy, which
-        # otherwise makes "s"/"sh" sounds more prominent than in the
-        # source recording.
-        f"deesser=i=0.4:m=0.5:f=0.5:s=o[{out_label}]"
+        # Still needed because Arabic recitation carries a lot of
+        # sibilant content on its own (seen/sheen/saad/zay), independent
+        # of any EQ — but with the presence lift and exciter both scaled
+        # back above, less correction is needed to keep it natural.
+        f"deesser=i=0.3:m=0.5:f=0.5:s=o[{out_label}]"
     )
 
 
