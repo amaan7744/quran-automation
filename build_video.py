@@ -48,7 +48,7 @@ HARD_MAX_DURATION   = 45.0   # never exceed this except for a single long ayah
 # Slow, duration-normalized Ken Burns zoom applied to the background during
 # the final composite. Subtle by design — see build_video_filter().
 ENABLE_CINEMATIC_ZOOM = True
-CINEMATIC_ZOOM_MAX    = 1.05  # 5% zoom over the full clip, never more
+CINEMATIC_ZOOM_MAX    = 1.03  # ~3% zoom over the full clip — almost invisible, never more
 
 
 def load_json(path: Path):
