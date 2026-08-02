@@ -2,33 +2,42 @@
 """
 human_filter.py
 Automatic, zero-manual-review filter that rejects any clip containing a
-person — not even for one frame.
+person, or a vehicle/transportation subject — not even for one frame.
 
 Why this exists as its own module: pexels_fetcher.py's keyword search
 (orientation=portrait + a nature query string) is not a content
-guarantee — Pexels regularly returns nature clips that include a
+guarantee — Pexels regularly returns "nature" clips that include a
 person walking into frame, a hand touching water, a distant silhouette,
-a reflection, etc. This module is the actual enforcement layer: every
-candidate clip must pass through here before it's allowed into the
-selected set, with no human ever asked to look at it.
+a cyclist, a boat, a car passing in the background, etc. This module is
+the actual enforcement layer: every candidate clip must pass through
+here before it's allowed into the selected set, with no human ever
+asked to look at it.
 
 APPROACH
 --------
 1. Sample several frames spread across the *entire* downloaded clip
    (not just frame 1) via a single ffmpeg pass using the `fps` filter,
-   so a person who only appears briefly mid-clip is still caught.
-2. Run YOLOv8n (COCO-pretrained, class 0 = "person") on the sampled
-   frames in one batched call.
-3. If a person is detected in ANY sampled frame, the whole clip is
-   rejected — no partial-clip trimming/salvaging, since we don't know
-   which portion downstream trimming will end up using.
+   so a person/vehicle who only appears briefly mid-clip is still caught.
+2. Run YOLOv8n (COCO-pretrained) on the sampled frames in one batched
+   call, restricted to REJECT_CLASSES: person, bicycle, car,
+   motorcycle, bus, train, truck, boat.
+3. If any of those classes is detected in ANY sampled frame, the whole
+   clip is rejected — no partial-clip trimming/salvaging, since we
+   don't know which portion downstream trimming will end up using.
 
-This catches full people, and — because COCO's "person" class is
-annotated on partially visible/occluded humans too (an arm, a torso,
-someone at a distance) — it also catches most of the partial cases
-(hands, distant figures, silhouettes) without needing a second model.
+This catches full people/vehicles, and — because COCO's "person" class
+is annotated on partially visible/occluded humans too (an arm, a
+torso, someone at a distance) — it also catches most of the partial
+human cases (hands, distant figures, silhouettes) without needing a
+second model. Note: COCO has no generic "building" or "city street"
+class, so those two items from the content filter aren't independently
+detectable here; in practice, footage that clears the nature-themed
+search queries and has no person/vehicle in it essentially never turns
+out to be a skyline shot, but this is a real, honestly-stated gap
+rather than a covered case.
+
 It intentionally runs at a LOW confidence threshold: for this use case
-a missed person is unacceptable, while an extra false-positive
+a missed person/vehicle is unacceptable, while an extra false-positive
 rejection just costs one more (fast, automatic) candidate — so the
 threshold is tuned to minimize false negatives, not to be "accurate."
 
@@ -59,12 +68,25 @@ log = get_logger(__name__)
 # which slice of the clip downstream trimming later picks.
 HUMAN_CHECK_SAMPLES = 6
 
-# Deliberately low: missing a person is unacceptable for this use case,
-# while a false-positive rejection is nearly free (pipeline just moves on
-# to the next candidate). COCO "person" default eval threshold is much
-# higher (~0.5); halving it trades some extra rejected-but-actually-empty
-# clips for meaningfully lower risk of a human slipping through.
+# Deliberately low: missing a person/vehicle is unacceptable for this use
+# case, while a false-positive rejection is nearly free (pipeline just moves
+# on to the next candidate). COCO's default eval threshold is much higher
+# (~0.5); halving it trades some extra rejected-but-actually-clean clips for
+# meaningfully lower risk of something slipping through.
 HUMAN_CHECK_CONFIDENCE = 0.25
+
+# COCO class ids to reject on sight, per the content filter: no people, and
+# no vehicles/transportation (cars, boats, bikes, buses, trains, trucks).
+REJECT_CLASSES = {
+    0: "person",
+    1: "bicycle",
+    2: "car",
+    3: "motorcycle",
+    5: "bus",
+    6: "train",
+    7: "truck",
+    8: "boat",
+}
 
 _MODEL = None  # lazy singleton so the (relatively expensive) model load
                 # happens once per pipeline run, not once per clip
@@ -119,29 +141,38 @@ def _extract_sample_frames(clip_path: Path, duration: float, frames_dir: Path,
     return sorted(frames_dir.glob("frame_*.jpg"))
 
 
-def _frames_contain_person(frame_paths: list, confidence: float) -> bool:
+def _frames_contain_rejected_subject(frame_paths: list, confidence: float):
+    """Returns the name of the first rejected class found (e.g. 'person',
+    'car'), or None if every sampled frame is clean."""
     model = _get_model()
     results = model.predict(
         [str(p) for p in frame_paths],
         conf=confidence,
-        classes=[0],  # COCO class 0 = "person"; ignore everything else
+        classes=list(REJECT_CLASSES.keys()),
         verbose=False,
     )
-    return any(len(r.boxes) > 0 for r in results)
+    for r in results:
+        for box in r.boxes:
+            cls_id = int(box.cls[0])
+            if cls_id in REJECT_CLASSES:
+                return REJECT_CLASSES[cls_id]
+    return None
 
 
 def clip_contains_person(clip_path: Path, duration: float, tmpdir: Path,
                           num_samples: int = HUMAN_CHECK_SAMPLES,
                           confidence: float = HUMAN_CHECK_CONFIDENCE) -> bool:
     """
-    Returns True if a person is detected in any sampled frame of
-    `clip_path` (i.e. the clip must be rejected), False only if every
-    sampled frame is clean.
+    Returns True if a person OR a vehicle/transportation subject (see
+    REJECT_CLASSES) is detected in any sampled frame of `clip_path` (i.e.
+    the clip must be rejected), False only if every sampled frame is
+    clean. Name kept as `clip_contains_person` for pipeline compatibility;
+    it now enforces the full "no humans, no transportation" content filter.
 
     Fails closed: if frames can't be sampled at all (corrupt/unreadable
     file that somehow passed the earlier ffprobe check), the clip is
-    treated as containing a person rather than risking an unverified
-    clip getting through.
+    treated as containing a rejected subject rather than risking an
+    unverified clip getting through.
     """
     frames_dir = tmpdir / f"human_check_{clip_path.stem}"
     try:
@@ -149,9 +180,9 @@ def clip_contains_person(clip_path: Path, duration: float, tmpdir: Path,
         if not frame_paths:
             log.warning("Could not sample frames from %s; rejecting out of caution", clip_path.name)
             return True
-        found = _frames_contain_person(frame_paths, confidence)
+        found = _frames_contain_rejected_subject(frame_paths, confidence)
         if found:
-            log.info("  Human detected in %s -> rejecting", clip_path.name)
-        return found
+            log.info("  Rejected subject '%s' detected in %s -> rejecting", found, clip_path.name)
+        return found is not None
     finally:
         shutil.rmtree(frames_dir, ignore_errors=True)
