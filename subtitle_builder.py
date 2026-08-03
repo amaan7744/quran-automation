@@ -312,11 +312,10 @@ BLOCK_GAP = 12
 # Approximate line-height multipliers (font size -> px per line). Arabic
 # needs more vertical room than the nominal font size suggests because
 # Quranic tashkeel (vowel marks) extend above and below the baseline.
-ARABIC_LINE_HEIGHT_FACTOR = 1.45
-EN_LINE_HEIGHT_FACTOR = 1.30
+ARABIC_LINE_HEIGHT_FACTOR = 1.30
+EN_LINE_HEIGHT_FACTOR = 1.20
 # Extra breathing room between wrapped lines within the same block.
-INTRA_BLOCK_LINE_GAP = 6
-
+INTRA_BLOCK_LINE_GAP = 2
 
 def _block_height(font_size: int, n_lines: int, line_factor: float) -> int:
     if not font_size or n_lines <= 0:
