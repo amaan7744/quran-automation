@@ -307,7 +307,7 @@ BLOCK_CENTER_Y = int(PLAY_RES_Y * 0.47)
 # translation block. Kept small so the translation sits snugly under the
 # Arabic — enough breathing room that the two never touch, not the wide
 # gap of a first pass.
-BLOCK_GAP = 12
+BLOCK_GAP = 1
 
 # Approximate line-height multipliers (font size -> px per line). Arabic
 # needs more vertical room than the nominal font size suggests because
