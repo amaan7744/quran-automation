@@ -10,6 +10,7 @@ captions/hashtags, and structured logging.
 import json
 import hashlib
 import os
+import random
 import re
 import sys
 import time
@@ -44,6 +45,17 @@ NON_RETRYABLE_OAUTH_ERRORS = {"invalid_grant", "invalid_client", "unauthorized_c
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 TRANSIENT_META_ERROR_CODES = {1, 2}  # Meta's own "unknown/temporary" error codes
 FACEBOOK_UNSUPPORTED_FIELD_ERROR_CODE = 100  # "(#100) Tried accessing nonexisting field ..."
+
+# upload_phase=finish only *starts* Meta's assemble/encode/publish pipeline
+# (per Meta's own Reels Publishing API docs); a 200 there is not proof the
+# Reel actually published. Poll GET /{video_id}?fields=status afterward.
+FACEBOOK_STATUS_POLL_ATTEMPTS = 30
+FACEBOOK_STATUS_POLL_INTERVAL_SECONDS = 10  # 5 min ceiling
+
+# A video is not servable on YouTube until processingDetails.processingStatus
+# leaves "processing", regardless of privacyStatus. Poll videos.list after upload.
+YOUTUBE_PROCESSING_POLL_ATTEMPTS = 30
+YOUTUBE_PROCESSING_POLL_INTERVAL_SECONDS = 10  # 5 min ceiling; we warn (not fail) past this
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -336,14 +348,39 @@ def with_retries(name: str, fn, *args, **kwargs):
 # CAPTION / HASHTAG GENERATION
 # ══════════════════════════════════════════════════════════════════════════
 
+CAPTION_INTRO_TEMPLATES = [
+    "{title}",
+    "🎧 {title}",
+    "{title} | Quran Recitation",
+]
+
+
 def generate_caption(meta: dict) -> str:
+    """
+    Builds the caption/description used across all three platforms.
+
+    Previously this always emitted the exact same intro wording and the
+    same first 10 hashtags from HASHTAG_POOL in the same order, on every
+    single upload — the only characters that ever changed were the
+    title/surah/ayah. Identical or near-identical captions and hashtag
+    blocks across consecutive posts are a documented negative signal for
+    recommendation systems on all three platforms (read as duplicate/
+    spammy content). This rotates the intro phrasing and shuffles the
+    hashtag selection per upload while keeping the substantive info
+    (title, surah, ayah range) intact.
+    """
     title = meta.get("title", "Quran Recitation")
     surah = meta.get("surah_name", "")
     first, last = meta.get("first_ayah"), meta.get("last_ayah")
     verse_range = f"Ayah {first}-{last}" if first and last and first != last else f"Ayah {last}"
 
-    tags = " ".join(HASHTAG_POOL[:10])
-    return f"{title}\n\nSurah {surah} | {verse_range}\n\n{tags}"
+    intro = random.choice(CAPTION_INTRO_TEMPLATES).format(title=title)
+
+    pool = list(HASHTAG_POOL)
+    random.shuffle(pool)
+    tags = " ".join(pool[:min(10, len(pool))])
+
+    return f"{intro}\n\nSurah {surah} | {verse_range}\n\n{tags}"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -394,10 +431,135 @@ def youtube_get_access_token() -> str:
     return token
 
 
+def _youtube_query_resume_offset(upload_url: str, file_size: int) -> int:
+    """
+    Per the documented resumable-upload recovery flow: PUT an empty body
+    with Content-Range: bytes */{file_size} to ask YouTube how many bytes
+    of the session it has actually received. A 308 with a Range header
+    (e.g. "bytes=0-524287") gives the last byte received; we resume at
+    the next one. A 308 with no Range header means nothing was received yet.
+    """
+    r = requests.put(
+        upload_url,
+        headers={"Content-Range": f"bytes */{file_size}", "Content-Length": "0"},
+        timeout=30,
+    )
+    if r.status_code == 308:
+        range_header = r.headers.get("Range")
+        return int(range_header.split("-")[-1]) + 1 if range_header else 0
+    if r.ok:
+        return file_size  # server already has the whole file
+    _raise_for_platform_error(r, "YouTube resumable upload offset check")
+
+
+def _youtube_upload_binary(upload_url: str, video_path: str, file_size: int) -> dict:
+    """
+    Uploads the video binary to an already-initialized resumable session.
+
+    Previously a single PUT sent the entire file with no recovery: any
+    network blip, timeout, or 5xx on a multi-GB file meant restarting the
+    whole upload from byte 0, defeating the point of using the resumable
+    protocol. This resumes from the last byte YouTube actually received.
+    """
+    offset = 0
+    last_error = None
+    for attempt in range(1, MAX_UPLOAD_RETRIES + 1):
+        try:
+            with open(video_path, "rb") as f:
+                f.seek(offset)
+                headers = {
+                    "Content-Length": str(file_size - offset),
+                    "Content-Type": "video/mp4",
+                }
+                if offset:
+                    headers["Content-Range"] = f"bytes {offset}-{file_size - 1}/{file_size}"
+                upload_r = requests.put(upload_url, headers=headers, data=f, timeout=600)
+
+            if upload_r.ok:
+                return upload_r.json()
+            if upload_r.status_code in TRANSIENT_HTTP_STATUSES:
+                raise TransientUploadError(f"YouTube binary upload transient error (HTTP {upload_r.status_code})")
+            _raise_for_platform_error(upload_r, "YouTube video binary upload")
+
+        except (TransientUploadError, requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_error = e
+            if attempt >= MAX_UPLOAD_RETRIES:
+                break
+            wait = RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+            log.warning(
+                "YouTube binary upload interrupted (attempt %d/%d): %s — resuming in %ds",
+                attempt, MAX_UPLOAD_RETRIES, e, wait,
+            )
+            time.sleep(wait)
+            offset = _youtube_query_resume_offset(upload_url, file_size)
+            log.info("YouTube upload resuming from byte %d/%d", offset, file_size)
+
+    raise TransientUploadError(f"YouTube binary upload failed after {MAX_UPLOAD_RETRIES} attempts: {last_error}")
+
+
+def _youtube_wait_for_processing(video_id: str, access_token: str) -> None:
+    """
+    A video is not servable on YouTube until processingDetails.processingStatus
+    leaves "processing" — this is true even for privacyStatus=public. Without
+    this check, the uploader declared success (and recorded it in history) the
+    moment the binary upload finished, with no idea whether YouTube's encode
+    pipeline subsequently failed the video.
+    """
+    if video_id == "unknown":
+        return
+    last_status = "processing"
+    for _ in range(YOUTUBE_PROCESSING_POLL_ATTEMPTS):
+        r = requests.get(
+            "https://www.googleapis.com/youtube/v3/videos",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"part": "processingDetails", "id": video_id},
+            timeout=30,
+        )
+        if not r.ok:
+            _raise_for_platform_error(r, "YouTube processing status check")
+
+        items = r.json().get("items", [])
+        if not items:
+            raise TransientUploadError(f"YouTube processing status check returned no items for video {video_id}")
+
+        last_status = items[0].get("processingDetails", {}).get("processingStatus", "processing")
+        log.info("  YouTube processing status: %s", last_status)
+
+        if last_status == "succeeded":
+            return
+        if last_status == "failed":
+            raise TransientUploadError(f"YouTube reported processing failure for video {video_id}")
+
+        time.sleep(YOUTUBE_PROCESSING_POLL_INTERVAL_SECONDS)
+
+    # Long/large videos can legitimately still be processing past our
+    # ceiling — warn rather than fail, so we don't trigger a duplicate
+    # re-upload of a video that is actually fine and just slow to encode.
+    log.warning(
+        "YouTube video %s still '%s' after %ds — not failing the upload, but it may not be fully live yet.",
+        video_id, last_status, YOUTUBE_PROCESSING_POLL_ATTEMPTS * YOUTUBE_PROCESSING_POLL_INTERVAL_SECONDS,
+    )
+
+
 def _upload_youtube(video_path: str, title: str, description: str) -> str:
     validate_video_file(Path(video_path))
     file_size = os.path.getsize(video_path)
     access_token = youtube_get_access_token()
+
+    # Keep a #Shorts hint in the title when there's room — still an
+    # official signal YouTube documents for routing content to Shorts,
+    # even though vertical/short-duration video is now auto-detected too.
+    snippet_title = title[:100]
+    has_shorts_tag = "#shorts" in snippet_title.lower() or "#shorts" in description.lower()
+    if not has_shorts_tag and len(snippet_title) + len(" #Shorts") <= 100:
+        snippet_title += " #Shorts"
+
+    snippet = {"title": snippet_title, "description": description, "categoryId": "29"}
+    if HASHTAG_POOL:
+        # Documented snippet.tags field — was previously left empty,
+        # so the only searchable keywords were whatever landed in the
+        # description text.
+        snippet["tags"] = [t.lstrip("#") for t in HASHTAG_POOL][:15]
 
     init_r = requests.post(
         "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
@@ -408,7 +570,7 @@ def _upload_youtube(video_path: str, title: str, description: str) -> str:
             "X-Upload-Content-Length": str(file_size),
         },
         json={
-            "snippet": {"title": title[:100], "description": description, "categoryId": "29"},
+            "snippet": snippet,
             "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
         }, timeout=30)
 
@@ -419,16 +581,12 @@ def _upload_youtube(video_path: str, title: str, description: str) -> str:
     if not upload_url:
         raise NonRetryableUploadError("YouTube did not return a resumable upload URL.")
 
-    with open(video_path, "rb") as f:
-        upload_r = requests.put(
-            upload_url,
-            headers={"Content-Length": str(file_size), "Content-Type": "video/mp4"},
-            data=f, timeout=600,
-        )
-    if not upload_r.ok:
-        _raise_for_platform_error(upload_r, "YouTube video binary upload")
+    upload_result = _youtube_upload_binary(upload_url, video_path, file_size)
+    video_id = upload_result.get("id", "unknown")
 
-    return upload_r.json().get("id", "unknown")
+    _youtube_wait_for_processing(video_id, access_token)
+
+    return video_id
 
 
 def upload_youtube(video_path: str, title: str, description: str) -> str:
@@ -440,7 +598,64 @@ def upload_youtube(video_path: str, title: str, description: str) -> str:
 # FACEBOOK REELS
 # ══════════════════════════════════════════════════════════════════════════
 
-def _upload_facebook(video_path: str, description: str) -> str:
+def _facebook_poll_publish_status(video_id: str) -> dict:
+    """
+    Polls GET /{video_id}?fields=status until the Reel finishes assembling,
+    encoding, and publishing (or errors out).
+
+    THIS IS THE LIKELY ROOT CAUSE of the Facebook view discrepancy. Per
+    Meta's own Reels Publishing API reference, upload_phase=finish "ends
+    the upload phase to start assembling and encoding the video" — a 200 OK
+    on that call only confirms Meta *accepted the request*, not that the
+    Reel actually finished processing or went live. The previous code
+    treated that 200 as final success: it recorded the post as published
+    in upload history and never checked again. A manual upload through the
+    Facebook app keeps the UI open and implicitly waits through this same
+    assemble/encode/publish pipeline before letting you leave the screen;
+    the API path had no equivalent wait, so any processing failure,
+    encoding rejection, or incomplete publish after `finish` returned would
+    go completely undetected — the video could sit in an errored or
+    never-fully-published state indefinitely while this script had already
+    logged it as a success. That matches a Reel that gets 0–20 views
+    (effectively undistributed) versus the same file, uploaded manually,
+    getting normal traffic.
+    """
+    last_status = {}
+    for attempt in range(1, FACEBOOK_STATUS_POLL_ATTEMPTS + 1):
+        status_r = requests.get(f"{GRAPH_BASE}/{video_id}", params={
+            "fields": "status", "access_token": META_ACCESS_TOKEN,
+        }, timeout=30)
+        if not status_r.ok:
+            _raise_for_platform_error(status_r, "Facebook Reels status check")
+
+        last_status = status_r.json().get("status", {})
+        uploading = last_status.get("uploading_phase", {}).get("status")
+        processing = last_status.get("processing_phase", {}).get("status")
+        publishing = last_status.get("publishing_phase", {}).get("status")
+        log.info(
+            "  Facebook Reels status (attempt %d/%d): uploading=%s processing=%s publishing=%s",
+            attempt, FACEBOOK_STATUS_POLL_ATTEMPTS, uploading, processing, publishing,
+        )
+
+        if "error" in (uploading, processing, publishing):
+            # Meta-side processing failures are usually transient (encoding
+            # queue issues, temporary capacity limits) — let with_retries
+            # redo the whole upload rather than silently recording a Reel
+            # that never actually published.
+            raise TransientUploadError(f"Facebook Reels processing/publishing failed: {last_status}")
+
+        if publishing == "complete":
+            return last_status
+
+        time.sleep(FACEBOOK_STATUS_POLL_INTERVAL_SECONDS)
+
+    raise TransientUploadError(
+        f"Facebook Reels did not finish processing/publishing within "
+        f"{FACEBOOK_STATUS_POLL_ATTEMPTS * FACEBOOK_STATUS_POLL_INTERVAL_SECONDS}s: {last_status}"
+    )
+
+
+def _upload_facebook(video_path: str, title: str, description: str) -> str:
     validate_video_file(Path(video_path))
     file_size = os.path.getsize(video_path)
 
@@ -477,18 +692,24 @@ def _upload_facebook(video_path: str, description: str) -> str:
             "video_id": video_id,
             "upload_phase": "finish",
             "video_state": "PUBLISHED",
+            "title": title[:255],
             "description": description[:2200],
         }, timeout=30)
 
     if not pub_r.ok:
         _raise_for_platform_error(pub_r, "Facebook Reels publish")
 
+    # pub_r.ok only means Meta accepted the finish request and started
+    # assembling/encoding — confirm it actually finished publishing before
+    # trusting this as a success.
+    _facebook_poll_publish_status(video_id)
+
     return video_id
 
 
-def upload_facebook(video_path: str, description: str) -> str:
+def upload_facebook(video_path: str, title: str, description: str) -> str:
     log.info("Uploading to Facebook Reels...")
-    return with_retries("Facebook upload", _upload_facebook, video_path, description)
+    return with_retries("Facebook upload", _upload_facebook, video_path, title, description)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -597,7 +818,7 @@ def main():
         if META_ACCESS_TOKEN and FACEBOOK_PAGE_ID:
             try:
                 validate_facebook_setup()
-                results["facebook"] = upload_facebook(video_path, description)
+                results["facebook"] = upload_facebook(video_path, title, description)
             except NonRetryableUploadError as e:
                 log.error("Facebook upload skipped: %s", e)
         else:
