@@ -2,7 +2,7 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    - cron: "0 0,8,16 * * *"
+    - cron:
   workflow_dispatch:
 
 concurrency:
