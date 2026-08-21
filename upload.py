@@ -57,6 +57,31 @@ FACEBOOK_STATUS_POLL_INTERVAL_SECONDS = 10  # 5 min ceiling
 YOUTUBE_PROCESSING_POLL_ATTEMPTS = 30
 YOUTUBE_PROCESSING_POLL_INTERVAL_SECONDS = 10  # 5 min ceiling; we warn (not fail) past this
 
+# The scope this script's YouTube calls actually require: resumable upload
+# AND videos.list read of processingDetails. Documenting it here does NOT
+# retroactively grant it to an already-issued YOUTUBE_REFRESH_TOKEN — a
+# refresh token only carries the scope(s) that were consented to at the time
+# it was issued (e.g. a token minted with only
+# "https://www.googleapis.com/auth/youtube.upload" will authenticate fine
+# for the upload itself but will get 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT on
+# the processingDetails read, exactly as seen in production). If that's the
+# case, the fix is a fresh OAuth authorization requesting this scope, which
+# yields a NEW refresh token to put in YOUTUBE_REFRESH_TOKEN — not a code
+# change in this file.
+YOUTUBE_REQUIRED_SCOPE = "https://www.googleapis.com/auth/youtube"
+
+# YouTube result states. "Uploaded" and "verified" are deliberately separate
+# axes: a video can be fully uploaded to YouTube (video_id exists) while its
+# processing/verification status is still unknown, still pending, or
+# unreachable due to an OAuth scope problem. None of those verification
+# outcomes are upload failures, and none of them should ever trigger a
+# re-upload.
+YOUTUBE_STATUS_VERIFIED = "uploaded_verified"                          # processingStatus == succeeded
+YOUTUBE_STATUS_PROCESSING = "uploaded_processing"                      # still processing at poll ceiling
+YOUTUBE_STATUS_VERIFICATION_SCOPE_ERROR = "uploaded_verification_scope_error"  # 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT
+YOUTUBE_STATUS_PROCESSING_FAILED = "uploaded_processing_failed"        # processingStatus == failed
+YOUTUBE_STATUS_FAILED = "failed"                                       # upload itself never produced a video_id
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # ERROR TYPES
