@@ -2,8 +2,8 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    - cron: '0 13 * * *'
-    - cron: '0 18 * * *'
+    - cron: '0 13 * * *'   # 18:30 IST
+    - cron: '0 18 * * *'   # 23:30 IST
   workflow_dispatch:
 
 concurrency:
