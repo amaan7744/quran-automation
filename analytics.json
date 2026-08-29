@@ -1,0 +1,72 @@
+{
+  "videos": {
+    "e83d947a89e559ecddc8c79170f87e210ee977c2e7e14bcebfff8eebde4fcffd": {
+      "title": "Surah Al-Baqarah 2:193-193 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 193,
+      "last_ayah": 193,
+      "duration": 11.554125,
+      "duration_bucket": "short_18_25",
+      "video_file": "output_video.mp4",
+      "video_hash": "e83d947a89e559ecddc8c79170f87e210ee977c2e7e14bcebfff8eebde4fcffd",
+      "visual_template": "TEMPLATE_10_CINEMATIC_NATURE",
+      "visual_mood": "reflection",
+      "visual_category": "mountain",
+      "motion_styles": [
+        "pull_out",
+        "drift_horizontal",
+        "static",
+        "static"
+      ],
+      "transition_style": "smoothright",
+      "color_grade": "neutral_cinematic",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "4/4",
+      "upload_time_utc": "2026-08-29T18:31:05Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-08-29T18:31:05Z"
+    }
+  },
+  "template_stats": {},
+  "duration_stats": {}
+}
