@@ -18,26 +18,26 @@ jobs:
       contents: write
 
     steps:
-      # --------------------------------------------------
+      # ==================================================
       # CHECKOUT
-      # --------------------------------------------------
+      # ==================================================
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      # --------------------------------------------------
+      # ==================================================
       # SYSTEM DEPENDENCIES
-      # --------------------------------------------------
+      # ==================================================
       - name: Install FFmpeg and System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fontconfig jq
 
-      # --------------------------------------------------
+      # ==================================================
       # FONTS
-      # --------------------------------------------------
+      # ==================================================
       - name: Install Fonts
         run: |
           mkdir -p ~/.fonts
@@ -53,44 +53,43 @@ jobs:
 
           fc-cache -fv
 
-      # --------------------------------------------------
-      # PYTHON
-      # --------------------------------------------------
+      # ==================================================
+      # PYTHON DEPENDENCIES
+      # ==================================================
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # --------------------------------------------------
-      # CLIP CACHE
+      # ==================================================
+      # LOCAL CLIP CACHE
       #
       # IMPORTANT:
-      # Do NOT restore the multi-GB .cache/clips directory
-      # with actions/cache. GitHub-hosted runners have limited
-      # disk space and the previous ~4.7 GB cache caused:
+      # Do NOT use actions/cache for .cache/clips.
       #
-      #   No space left on device
+      # The previous workflow restored a ~4.7 GB archive,
+      # which exhausted the GitHub Actions runner disk while
+      # extracting the cache.
       #
-      # The build_video.py pipeline should download only the
-      # clips required for the current video.
-      # --------------------------------------------------
-
+      # The cache is intentionally runner-local and starts
+      # empty on each GitHub-hosted runner.
+      # ==================================================
       - name: Prepare Clip Cache
         run: |
           mkdir -p .cache/clips
-          echo "Using fresh runner-local clip cache."
+          echo "Prepared runner-local clip cache."
 
-      # --------------------------------------------------
-      # META TOKEN DEBUG
-      # --------------------------------------------------
+      # ==================================================
+      # VERIFY META ACCESS TOKEN
+      # ==================================================
       - name: Verify Meta Token
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: |
-          echo "Checking GitHub Secret..."
+          echo "Checking Meta access token..."
 
           if [ -z "$META_ACCESS_TOKEN" ]; then
-            echo "ERROR: META_ACCESS_TOKEN is not configured."
+            echo "ERROR: META_ACCESS_TOKEN secret is not configured."
             exit 1
           fi
 
@@ -98,9 +97,9 @@ jobs:
             "https://graph.facebook.com/v25.0/me?fields=id,name&access_token=$META_ACCESS_TOKEN" \
             | jq .
 
-      # --------------------------------------------------
+      # ==================================================
       # BUILD VIDEO
-      # --------------------------------------------------
+      # ==================================================
       - name: Build Video
         id: build
         env:
@@ -110,9 +109,9 @@ jobs:
         run: |
           python build_video.py
 
-      # --------------------------------------------------
+      # ==================================================
       # COMMIT BUILD PROGRESS
-      # --------------------------------------------------
+      # ==================================================
       - name: Commit Progress
         if: success()
         run: |
@@ -127,15 +126,18 @@ jobs:
             git add analytics.json
           fi
 
-          git diff --cached --quiet || \
-            git commit -m "chore: update progress [skip ci]" || true
+          if git diff --cached --quiet; then
+            echo "No progress changes to commit."
+          else
+            git commit -m "chore: update progress [skip ci]"
+          fi
 
           git pull --rebase origin main || true
-          git push origin HEAD:main || echo "Nothing to push"
+          git push origin HEAD:main || echo "Nothing to push."
 
-      # --------------------------------------------------
-      # UPLOAD
-      # --------------------------------------------------
+      # ==================================================
+      # UPLOAD VIDEO
+      # ==================================================
       - name: Upload Video
         if: success()
         env:
@@ -148,9 +150,9 @@ jobs:
         run: |
           python upload.py
 
-      # --------------------------------------------------
+      # ==================================================
       # SAVE UPLOAD HISTORY
-      # --------------------------------------------------
+      # ==================================================
       - name: Save Upload History
         if: always()
         run: |
@@ -165,15 +167,18 @@ jobs:
             git add analytics.json
           fi
 
-          git diff --cached --quiet || \
-            git commit -m "chore: update upload history [skip ci]" || true
+          if git diff --cached --quiet; then
+            echo "No upload history changes to commit."
+          else
+            git commit -m "chore: update upload history [skip ci]"
+          fi
 
           git pull --rebase origin main || true
-          git push origin HEAD:main || echo "Nothing to push"
+          git push origin HEAD:main || echo "Nothing to push."
 
-      # --------------------------------------------------
-      # LOGS / DEBUG ARTIFACTS
-      # --------------------------------------------------
+      # ==================================================
+      # UPLOAD LOGS / METADATA
+      # ==================================================
       - name: Upload Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -185,13 +190,3 @@ jobs:
             analytics.json
           if-no-files-found: ignore
           retention-days: 7
-
-      # --------------------------------------------------
-      # CLEAN LARGE TEMPORARY FILES
-      # --------------------------------------------------
-      - name: Cleanup Workspace
-        if: always()
-        run: |
-          rm -rf .cache/clips/*
-          rm -rf /tmp/*
-          echo "Temporary video assets cleaned up."
