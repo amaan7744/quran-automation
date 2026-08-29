@@ -1,2 +1,6 @@
 requests>=2.31.0
 ultralytics
+# Optional: only needed if BISMILLAH_TTS_ENABLED=true (intro_builder.py's
+# Arabic TTS fallback for the Bismillah opening — see config.py). Not
+# required for the default local-audio-file path (BISMILLAH_AUDIO_PATH).
+gtts>=2.5.0
