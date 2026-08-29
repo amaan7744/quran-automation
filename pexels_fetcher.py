@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
 pexels_fetcher.py
-Fetches simple, good-looking vertical nature footage from Pexels and
+Fetches good-looking vertical cinematic footage from Pexels and
 assembles it into a single background video for the Quran video.
 
 Pipeline:
-  1. Pick ONE visual theme (forest / mountain / ocean / winter /
-     sky-and-night) for this reel and search Pexels using only that
-     theme's cinematic queries — see THEME SELECTION note below. This
+  1. Search Pexels using only the CURRENT category's cinematic queries
+     from a category fallback chain chosen upstream by visual_engine.py
+     (item 3/11 of the brief) — see CATEGORY SELECTION note below. This
      keeps every clip in a reel visually related instead of jumping
-     between unrelated environments.
+     between unrelated environments, while still allowing a graceful,
+     visually-coherent fallback if the primary category runs dry.
   2. Download vertical videos only.
-  3. Reject a downloaded clip if it's not vertical, below 720x1280,
-     shorter than MIN_CLIP_DURATION, or corrupted/unreadable (all
-     checked with a single cheap ffprobe call — see quality_filter.py).
+  3. Reject a downloaded clip if it's not vertical, below the
+     configured minimum resolution (MIN_CLIP_WIDTH x MIN_CLIP_HEIGHT —
+     1080x1920 by default, see SOURCE QUALITY TIERS below), shorter
+     than MIN_CLIP_DURATION, or corrupted/unreadable (all checked with
+     a single cheap ffprobe call — see quality_filter.py).
   4. CONTENT FILTER (mandatory, fully automatic — see HUMAN FILTER note
      below): sample multiple frames across the whole clip and run them
      through a detector for people AND vehicles/transportation (cars,
@@ -23,26 +26,35 @@ Pipeline:
      rejected clip is simply discarded and the next candidate is tried,
      automatically, until enough clean clips are collected.
   5. Randomly select enough clean clips to cover the needed duration,
-     pulling additional search rounds within the SAME theme
+     pulling additional search rounds within the SAME category
      automatically if the first batch isn't enough (see
-     MAX_GATHER_ROUNDS).
-  6. Trim each clip to a random 3-5s length, apply a subtle unified
-     color grade, AND normalize it to a single common format
-     (resolution, constant fps, pixel format, SAR, timebase) — see
-     NORMALIZATION note below.
-  7. Concatenate the now-identical, color-matched clips together.
-  8. Add short, subtle crossfades between clips (~250-400ms).
+     MAX_GATHER_ROUNDS), then moving down the fallback chain (item 11)
+     if the category genuinely can't fill the reel.
+  6. Trim each clip to a random length within the template's
+     clip_duration_range, apply a per-clip motion style (item 8, via
+     video_effects.apply_motion), apply the template's color grade
+     (item 9), AND normalize it to a single common format (resolution,
+     constant fps, pixel format, SAR, timebase) — see NORMALIZATION
+     note below.
+  7. Concatenate the now-identical, color-matched, motion-applied clips
+     together.
+  8. Add short, subtle crossfades between clips using the template's
+     chosen transition style (~250-400ms).
   9. Use the result as the background for the Quran video.
 
-THEME SELECTION NOTE:
+CATEGORY SELECTION NOTE:
 Each reel should read as one intentional environment, not a stitched-
-together mix of forest + ocean + desert clips. THEMED_QUERIES in
-config.py groups cinematic search terms by mood. collect_clips() picks
-one theme at random and stays with it across every search round for
-that reel; it only reaches into a second theme as a last-resort
-fallback if the first theme genuinely can't fill the needed duration
-(logged clearly when this happens, since it's the exception, not the
-norm).
+together mix of forest + ocean + desert clips. visual_themes.py groups
+cinematic search terms by category and defines a fallback chain per
+category (item 11: primary -> related -> general cinematic). The
+caller (visual_engine.py) picks the category chain for this reel based
+on its mood; collect_clips() stays on the first category in the chain
+across every search round, and only advances to the next category in
+the chain as a last resort if that category genuinely can't fill the
+needed duration (logged clearly when this happens, since it's the
+exception, not the norm). Legacy callers that don't have an
+upstream-selected chain still work: build_background() defaults to a
+single random category from the full VISUAL_CATEGORIES pool.
 
 HUMAN FILTER NOTE:
 NO HUMAN MAY EVER APPEAR IN THE BACKGROUND — not even for one frame.
@@ -56,6 +68,18 @@ allowed into the selected set. This is a hard gate: a positive
 detection rejects the clip immediately and unconditionally, with no
 manual step. See human_filter.py for the full detection approach and
 its honestly-stated limits.
+
+SOURCE QUALITY TIERS (item 3/10 of the 2K pass):
+Pexels returns several resolution variants per clip in `video_files`.
+search_pexels() now explicitly tiers these — preferring 2160p (4K) >
+1440p > 1080p — rather than just "the largest available," and records
+which tier was actually used (source_width/source_height, plus a
+human-readable "source_quality_tier") on every candidate, so the final
+video's metadata can honestly report whether a given clip was native
+2K-or-better footage or a 1080p fallback (never silently presented as
+native 2K). MIN_CLIP_WIDTH/MIN_CLIP_HEIGHT in config.py set a hard
+floor at 1080p — anything softer than that is rejected outright rather
+than accepted and stretched two resolution tiers up to fill the frame.
 
 NORMALIZATION NOTE:
 Pexels clips arrive with mixed frame rates (24/25/30/60fps), mixed
@@ -82,20 +106,22 @@ cross-dissolve.
 
 import random
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 import requests
 
 from config import (
-    PEXELS_API_KEY, PEXELS_SEARCH_URL, THEMED_QUERIES, CLIPS_PER_QUERY,
+    PEXELS_API_KEY, PEXELS_SEARCH_URL, CLIPS_PER_QUERY,
     QUERIES_PER_RUN, DURATION_BUFFER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
     CLIP_TRIM_MIN, CLIP_TRIM_MAX, VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS,
-    TRANSITION_DURATION, GRADE_CONTRAST, GRADE_SATURATION, GRADE_BRIGHTNESS,
-    GRADE_SHADOW_WARMTH, GRADE_HIGHLIGHT_WARMTH,
+    TRANSITION_DURATION, INTERMEDIATE_ENCODE_CRF, INTERMEDIATE_ENCODE_PRESET,
 )
+from visual_themes import VISUAL_CATEGORIES, COLOR_GRADES
 from logging_utils import get_logger
 from quality_filter import is_used_before, mark_used, cached_path_for, validate_clip
 from human_filter import clip_contains_person, HumanFilterError
+from video_effects import motion_filter_fragment, atmosphere_overlay_fragment, pick_motion_style
 
 log = get_logger(__name__)
 
@@ -112,9 +138,28 @@ NORMALIZED_TIMESCALE = 90000
 # loop burning API quota / CI minutes — it fails loudly instead.
 MAX_GATHER_ROUNDS = 4
 
+# Named source-resolution tiers (item 3/10 of the 2K pass), checked in
+# this order — highest quality first. A file only needs to meet the
+# WIDTH threshold since Pexels portrait files are already true 9:16 (a
+# "2160p" portrait file is 2160x3840, so checking width>=2160 is
+# sufficient and avoids being overly strict about a source that's
+# e.g. 2160x3830 due to minor encoder rounding).
+SOURCE_QUALITY_TIERS = [
+    ("2160p", 2160),
+    ("1440p", 1440),
+    ("1080p", 1080),
+]
+
 
 class PexelsError(RuntimeError):
     pass
+
+
+def _classify_source_tier(width: int) -> str:
+    for tier_name, min_width in SOURCE_QUALITY_TIERS:
+        if width >= min_width:
+            return tier_name
+    return "below_1080p"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -150,18 +195,31 @@ def search_pexels(query: str, count: int, session: requests.Session) -> list:
         if vid_id is None or is_used_before(vid_id):
             continue
 
-        # 2. Download vertical videos only — pick the largest portrait file.
+        # 2. Download vertical videos only. Prefer the highest available
+        # resolution tier (2160p > 1440p > 1080p — item 3/10 of the 2K
+        # pass) rather than blindly "the largest available," so a
+        # 4K-capable source is never accidentally passed over for a
+        # merely-large-for-1080p one. Sorting portrait files by area
+        # descending first, THEN classifying the winner's tier, means
+        # we still get the single best file Pexels actually offers for
+        # this clip (Pexels typically exposes one file per resolution
+        # tier, not several competing options within the same tier).
         files = vid.get("video_files", [])
         portrait = [f for f in files if f.get("height", 0) > f.get("width", 1)]
         if not portrait:
             continue
         portrait.sort(key=lambda x: x.get("width", 0) * x.get("height", 0), reverse=True)
-        if not portrait[0].get("link"):
+        best = portrait[0]
+        if not best.get("link"):
             continue
 
+        source_width, source_height = best.get("width", 0), best.get("height", 0)
         candidates.append({
             "id": vid_id,
-            "url": portrait[0]["link"],
+            "url": best["link"],
+            "source_width": source_width,
+            "source_height": source_height,
+            "source_quality_tier": _classify_source_tier(source_width),
             "duration": duration,
         })
         if len(candidates) >= count:
@@ -170,10 +228,13 @@ def search_pexels(query: str, count: int, session: requests.Session) -> list:
     return candidates
 
 
-def pick_theme() -> tuple:
-    """Picks one random visual theme and returns (theme_name, query_list)."""
-    theme_name = random.choice(list(THEMED_QUERIES.keys()))
-    return theme_name, THEMED_QUERIES[theme_name]
+def pick_category() -> tuple:
+    """Picks one random visual category and returns (category_name, query_list).
+    Only used when no upstream category chain was supplied (legacy/manual
+    call path) — the normal pipeline path always gets its chain from
+    visual_engine.choose_plan()."""
+    category_name = random.choice(list(VISUAL_CATEGORIES.keys()))
+    return category_name, VISUAL_CATEGORIES[category_name]
 
 
 def gather_candidates(query_pool: list) -> list:
@@ -222,7 +283,7 @@ def acquire_clip(candidate: dict, tmpdir: Path) -> Path:
 # 3-4. VALIDATE + RANDOMLY SELECT
 # ══════════════════════════════════════════════════════════════════════════
 
-def _evaluate_candidate(candidate: dict, tmpdir: Path):
+def _evaluate_candidate(candidate: dict, tmpdir: Path, clip_duration_range: tuple):
     """
     Downloads one candidate and runs it through every automatic gate:
     ffprobe validity, then (the hard requirement) the human-detection
@@ -257,36 +318,56 @@ def _evaluate_candidate(candidate: dict, tmpdir: Path):
         mark_used(candidate["id"])
         return None
 
-    trim_duration = round(random.uniform(CLIP_TRIM_MIN, CLIP_TRIM_MAX), 2)
+    lo, hi = clip_duration_range
+    trim_duration = round(random.uniform(lo, hi), 2)
     mark_used(candidate["id"])
-    log.info("  Selected clip %s (trim=%.1fs)", candidate["id"], trim_duration)
-    return path, trim_duration
+    log.info("  Selected clip %s (trim=%.1fs, source=%dx%d [%s])", candidate["id"], trim_duration,
+              candidate.get("source_width", 0), candidate.get("source_height", 0),
+              candidate.get("source_quality_tier", "unknown"))
+    return path, trim_duration, {
+        "source_width": candidate.get("source_width", 0),
+        "source_height": candidate.get("source_height", 0),
+        "source_quality_tier": candidate.get("source_quality_tier", "unknown"),
+    }
 
 
-def collect_clips(total_duration: float, tmpdir: Path) -> list:
+def collect_clips(total_duration: float, tmpdir: Path, category_chain: list = None,
+                   clip_duration_range: tuple = (CLIP_TRIM_MIN, CLIP_TRIM_MAX)) -> tuple:
     """
     Downloads candidates, validates each (ffprobe check + mandatory
     human-detection filter — see human_filter.py), and randomly selects
     enough human-free clips to cover total_duration (with a small buffer
-    for trimming/crossfades). Returns a list of (path, trim_duration)
-    pairs.
+    for trimming/crossfades). Returns (clips, category_used) where clips
+    is a list of (path, trim_duration, source_info) triples — source_info
+    is {"source_width", "source_height", "source_quality_tier"} for that
+    clip's chosen Pexels file (item 3/10 of the 2K pass).
 
     Fully automatic end to end: if one search round doesn't turn up
     enough usable clips (e.g. an unusually people/vehicle-heavy batch),
     it automatically pulls another round of candidates from the SAME
-    theme and keeps going — up to MAX_GATHER_ROUNDS — with no manual
-    intervention. Stays on one visual theme throughout so the reel
-    reads as one cohesive environment; only falls back to a second
-    theme if the first one genuinely can't fill the needed duration.
+    category and keeps going — up to MAX_GATHER_ROUNDS — with no manual
+    intervention. Stays on one visual category throughout so the reel
+    reads as one cohesive environment; only advances to the next
+    category in `category_chain` (see visual_themes.fallback_chain) if
+    the current one genuinely can't fill the needed duration.
+
+    `category_chain` defaults to a single random category (legacy/manual
+    call path) when not supplied by visual_engine.py.
     """
+    if not category_chain:
+        name, _ = pick_category()
+        category_chain = [name]
+    chain = list(category_chain)
+
     needed = total_duration * DURATION_BUFFER
     selected = []
+    selected_categories = []  # parallel list: which category each selected clip came from
     accumulated = 0.0
     tried_ids = set()
 
-    theme_name, theme_queries = pick_theme()
-    log.info("Visual theme for this reel: %s", theme_name)
-    remaining_themes = [t for t in THEMED_QUERIES if t != theme_name]
+    category_name = chain.pop(0)
+    category_queries = VISUAL_CATEGORIES[category_name]
+    log.info("Visual category for this reel: %s", category_name)
 
     round_num = 0
     while round_num < MAX_GATHER_ROUNDS:
@@ -294,31 +375,34 @@ def collect_clips(total_duration: float, tmpdir: Path) -> list:
         if accumulated >= needed:
             break
 
-        candidates = [c for c in gather_candidates(theme_queries) if c["id"] not in tried_ids]
+        candidates = [c for c in gather_candidates(category_queries) if c["id"] not in tried_ids]
         if not candidates:
-            log.info("Round %d (%s): no new candidates found", round_num, theme_name)
+            log.info("Round %d (%s): no new candidates found", round_num, category_name)
         else:
             log.info("Round %d (%s): evaluating %d candidates (%.1fs / %.1fs collected so far)",
-                      round_num, theme_name, len(candidates), accumulated, needed)
+                      round_num, category_name, len(candidates), accumulated, needed)
             for candidate in candidates:
                 if accumulated >= needed:
                     break
                 tried_ids.add(candidate["id"])
-                result = _evaluate_candidate(candidate, tmpdir)
+                result = _evaluate_candidate(candidate, tmpdir, clip_duration_range)
                 if result is None:
                     continue
-                path, trim_duration = result
-                selected.append((path, trim_duration))
+                path, trim_duration, source_info = result
+                selected.append((path, trim_duration, source_info))
+                selected_categories.append(category_name)
                 accumulated += trim_duration
 
-        # Last-resort fallback: the chosen theme couldn't fill the reel on
-        # its own even after every round. Switch to one more theme rather
-        # than failing the whole run — logged clearly since visual
-        # consistency is being relaxed as an exception, not the default.
-        if accumulated < needed and round_num >= MAX_GATHER_ROUNDS and remaining_themes:
-            theme_name = remaining_themes.pop(random.randrange(len(remaining_themes)))
-            theme_queries = THEMED_QUERIES[theme_name]
-            log.warning("Primary theme couldn't fill the reel; falling back to theme: %s", theme_name)
+        # Fallback: the chosen category couldn't fill the reel on its
+        # own even after every round. Advance to the next category in
+        # the chain (item 11: primary -> related -> general cinematic)
+        # rather than failing the whole run — logged clearly since
+        # visual consistency is being relaxed as an exception, not the
+        # default.
+        if accumulated < needed and round_num >= MAX_GATHER_ROUNDS and chain:
+            category_name = chain.pop(0)
+            category_queries = VISUAL_CATEGORIES[category_name]
+            log.warning("Primary category couldn't fill the reel; falling back to category: %s", category_name)
             round_num = 0
 
     if not selected:
@@ -327,21 +411,39 @@ def collect_clips(total_duration: float, tmpdir: Path) -> list:
             "unreadable, or contained a person/vehicle."
         )
 
-    random.shuffle(selected)
-    return selected
+    # The category actually reported for this reel is whichever category
+    # contributed the most selected clips — NOT necessarily the last
+    # category the loop happened to be trying when it exited (which may
+    # have contributed zero clips, e.g. if every fallback category ran
+    # dry). This keeps visual_category metadata (item 13) honest about
+    # what's actually in the reel.
+    category_used = Counter(selected_categories).most_common(1)[0][0]
+
+    # Shuffle clip order, but keep each clip paired with the category it
+    # came from so a mixed-fallback reel doesn't lose that information —
+    # shuffle indices instead of the flat (path, duration) list.
+    order = list(range(len(selected)))
+    random.shuffle(order)
+    selected = [selected[i] for i in order]
+    return selected, category_used
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # 5. TRIM / NORMALIZE
 # ══════════════════════════════════════════════════════════════════════════
 
-def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
+def trim_and_normalize(src: Path, dst: Path, duration: float, grade: dict,
+                        motion_style: str = "static", atmosphere_intensity: str = "low") -> None:
     """
-    Trims `src` to `duration` seconds and normalizes it to a single common
-    format so that every clip fed into crossfade_concat is guaranteed
-    identical on every property xfade cares about:
+    Trims `src` to `duration` seconds, applies a per-clip motion style
+    (item 8) and a color grade (item 9), and normalizes the result to a
+    single common format so that every clip fed into crossfade_concat is
+    guaranteed identical on every property xfade cares about:
 
-      - VIDEO_WIDTH x VIDEO_HEIGHT (scale + center crop)
+      - VIDEO_WIDTH x VIDEO_HEIGHT (via the motion fragment's own
+        scale+crop, or scale+crop directly for "static")
       - constant VIDEO_FPS (the `fps` filter resamples 24/25/30/60fps
         sources onto one constant frame rate, unlike `-r` alone which can
         leave irregular frame timing in place)
@@ -354,22 +456,28 @@ def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
 
     This is a real re-encode (not `-c copy`) specifically because only a
     re-encode can rewrite fps/SAR/pixel format/timebase; xfade is never
-    relied upon to reconcile any of these. The same re-encode is also
-    used to bake in a subtle, identical color grade (see GRADE_* in
-    config.py) on every clip, so footage pulled from different Pexels
-    sources within a theme doesn't visibly jump between warm/cold or
-    flat/saturated looks once concatenated.
+    relied upon to reconcile any of these. Motion, color grade, and an
+    optional very light atmospheric grain overlay (item 6) are baked
+    into this SAME re-encode pass (rather than separate ffmpeg calls)
+    so a clip is only ever re-encoded once. `grade` is one of
+    visual_themes.COLOR_GRADES's value dicts.
     """
-    vf = (
-        f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
-        f"fps={VIDEO_FPS},"
-        f"setsar=1,"
-        f"eq=contrast={GRADE_CONTRAST}:saturation={GRADE_SATURATION}:brightness={GRADE_BRIGHTNESS},"
-        f"colorbalance=rs={GRADE_SHADOW_WARMTH}:bs={-GRADE_SHADOW_WARMTH}:"
-        f"rh={GRADE_HIGHLIGHT_WARMTH}:bh={-GRADE_HIGHLIGHT_WARMTH},"
-        f"format=yuv420p"
-    )
+    motion_fragment = motion_filter_fragment(motion_style, duration, VIDEO_FPS, VIDEO_WIDTH, VIDEO_HEIGHT)
+    atmosphere_fragment = atmosphere_overlay_fragment(atmosphere_intensity)
+
+    vf_parts = [
+        motion_fragment,
+        f"fps={VIDEO_FPS}",
+        "setsar=1",
+        f"eq=contrast={grade['contrast']}:saturation={grade['saturation']}:brightness={grade['brightness']}",
+        f"colorbalance=rs={grade['shadow_warmth']}:bs={-grade['shadow_warmth']}:"
+        f"rh={grade['highlight_warmth']}:bh={-grade['highlight_warmth']}",
+    ]
+    if atmosphere_fragment:
+        vf_parts.append(atmosphere_fragment)
+    vf_parts.append("format=yuv420p")
+    vf = ",".join(vf_parts)
+
     cmd = [
         "ffmpeg", "-y", "-i", str(src),
         "-t", str(duration),
@@ -377,7 +485,7 @@ def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
         "-r", str(VIDEO_FPS),
         "-fps_mode", "cfr",
         "-video_track_timescale", str(NORMALIZED_TIMESCALE),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:v", "libx264", "-preset", INTERMEDIATE_ENCODE_PRESET, "-crf", str(INTERMEDIATE_ENCODE_CRF),
         "-an",
         str(dst),
     ]
@@ -391,9 +499,14 @@ def trim_and_normalize(src: Path, dst: Path, duration: float) -> None:
 # ══════════════════════════════════════════════════════════════════════════
 
 def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
+                      transition_style: str = "fade",
                       transition: float = TRANSITION_DURATION, fps: int = VIDEO_FPS) -> None:
     """
-    Joins already-normalized clips with xfade crossfade transitions.
+    Joins already-normalized clips with xfade crossfade transitions,
+    using ONE consistent transition_style for the whole reel (chosen
+    once per reel by visual_engine.py — item 7/9: a template's
+    transition_style — so the edit reads as one intentional choice
+    rather than a random transition per cut).
 
     By this point every clip in clip_paths has already been produced by
     trim_and_normalize(), so all inputs share identical resolution, fps,
@@ -420,7 +533,7 @@ def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
         offset = max(cumulative + durations[i - 1] - transition, 0.1)
         out_label = f"v{i}" if i < len(clip_paths) - 1 else "vout"
         filter_parts.append(
-            f"[{last_label}][{i}:v]xfade=transition=fade:duration={transition}:offset={offset:.3f}[{out_label}]"
+            f"[{last_label}][{i}:v]xfade=transition={transition_style}:duration={transition}:offset={offset:.3f}[{out_label}]"
         )
         cumulative += durations[i - 1] - transition
         last_label = out_label
@@ -434,45 +547,85 @@ def crossfade_concat(clip_paths: list, durations: list, out_path: Path,
         "-r", str(fps),
         "-fps_mode", "cfr",
         "-video_track_timescale", str(NORMALIZED_TIMESCALE),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:v", "libx264", "-preset", INTERMEDIATE_ENCODE_PRESET, "-crf", str(INTERMEDIATE_ENCODE_CRF),
         "-an",
         str(out_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        # xfade's chosen transition_style can, in rare cases, be a name
+        # this ffmpeg build doesn't support. Retry once with the always-
+        # available "fade" rather than failing the whole render over a
+        # cosmetic transition choice.
+        if transition_style != "fade":
+            log.warning("Crossfade with transition '%s' failed, retrying with 'fade': %s",
+                        transition_style, result.stderr[-300:])
+            crossfade_concat(clip_paths, durations, out_path, "fade", transition, fps)
+            return
         raise RuntimeError(f"Crossfade concat failed: {result.stderr[-500:]}")
-    log.info("Crossfade background assembled -> %s", out_path.name)
+    log.info("Crossfade background assembled -> %s (transition=%s)", out_path.name, transition_style)
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # PUBLIC ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════
 
-def build_background(total_duration: float, tmpdir: Path, out_path: Path) -> None:
+def build_background(total_duration: float, tmpdir: Path, out_path: Path,
+                      category_chain: list = None, color_grade: str = "neutral_cinematic",
+                      motion_pool: list = None, transition_style: str = "fade",
+                      clip_duration_range: tuple = (CLIP_TRIM_MIN, CLIP_TRIM_MAX),
+                      fps: int = VIDEO_FPS) -> dict:
     """
-    Full pipeline: search -> validate -> select -> trim+normalize ->
-    crossfade concat -> trim to exact audio duration.
-    """
-    clips = collect_clips(total_duration, tmpdir)
+    Full pipeline: search -> validate -> select -> trim+normalize (with
+    per-clip motion + color grade + light atmosphere) -> crossfade
+    concat (with the chosen transition style). crossfade_concat's own
+    output IS `out_path` directly — there is deliberately no extra
+    "trim to exact duration" re-encode pass after it (item 5 of the 2K
+    pass: "avoid unnecessary repeated lossy encoding"): the background
+    is already over-provisioned to exceed total_duration (see
+    DURATION_BUFFER in collect_clips), and merge_main_segment's own
+    `-t total_duration` on the FINAL composite already truncates it to
+    the exact recitation length — re-trimming it here first was a
+    whole extra full-resolution encode generation that never changed
+    the final output.
 
-    trimmed_paths, trimmed_durations = [], []
-    for i, (path, duration) in enumerate(clips):
+    Every parameter beyond total_duration/tmpdir/out_path is optional
+    with a safe default, so this remains callable exactly as before for
+    any legacy/manual use. The normal pipeline path always supplies them
+    via visual_engine.build_background_for_plan().
+
+    Returns {"motion_styles": [...], "source_clips": [...]} — the list
+    of motion styles actually applied (one per clip, in concatenation
+    order) and each clip's source resolution/quality tier (item 3/10 of
+    the 2K pass) — both consumed by build_video.py for the video's
+    metadata.
+    """
+    clips, category_used = collect_clips(total_duration, tmpdir, category_chain, clip_duration_range)
+    grade = COLOR_GRADES.get(color_grade, COLOR_GRADES["neutral_cinematic"])
+
+    # Atmosphere intensity travels with the template, but build_background
+    # only receives category_chain/color_grade/motion_pool/transition
+    # from visual_engine — infer a sensible default here rather than
+    # requiring yet another parameter, since this is a light polish
+    # layer, not a correctness-critical one.
+    atmosphere_intensity = "medium"
+
+    trimmed_paths, trimmed_durations, motion_styles_used, source_clips = [], [], [], []
+    for i, (path, duration, source_info) in enumerate(clips):
+        motion_style = pick_motion_style(motion_pool)
         trimmed_out = tmpdir / f"trim_{i:03d}.mp4"
-        trim_and_normalize(path, trimmed_out, duration)
+        trim_and_normalize(path, trimmed_out, duration, grade, motion_style, atmosphere_intensity)
         trimmed_paths.append(trimmed_out)
         trimmed_durations.append(duration)
+        motion_styles_used.append(motion_style)
+        source_clips.append(source_info)
 
-    joined = tmpdir / "bg_joined.mp4"
-    crossfade_concat(trimmed_paths, trimmed_durations, joined, fps=VIDEO_FPS)
+    crossfade_concat(trimmed_paths, trimmed_durations, out_path, transition_style=transition_style, fps=fps)
 
-    # Trim/pad to the exact audio duration
-    cmd = [
-        "ffmpeg", "-y", "-i", str(joined),
-        "-t", str(total_duration),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-        "-an", str(out_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Final background trim failed: {result.stderr[-400:]}")
-    log.info("Background ready -> %s (%.1fs, %d clips)", out_path.name, total_duration, len(clips))
+    below_2k = sum(1 for c in source_clips if c["source_quality_tier"] not in ("2160p", "1440p"))
+    if below_2k:
+        log.info("%d/%d clips in this reel used sub-2K source footage (1080p fallback) — see metadata.",
+                  below_2k, len(source_clips))
+    log.info("Background ready -> %s (%.1fs, %d clips, category=%s)",
+              out_path.name, total_duration, len(clips), category_used)
+    return {"motion_styles": motion_styles_used, "source_clips": source_clips, "category_used": category_used}
