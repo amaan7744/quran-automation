@@ -2,8 +2,8 @@ name: Quran Daily Upload
 
 on:
   schedule:
-    - cron: '0 13 * * *'   # 18:30 IST
-    - cron: '0 18 * * *'   # 23:30 IST
+    - cron: '0 13 * * *'
+    - cron: '0 18 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -87,6 +87,15 @@ jobs:
             git add progress.json
           fi
 
+          # analytics.json persists the visual-template/duration explore-
+          # exploit history (see performance_metadata.py) across runs —
+          # without committing it back, every run would be a cold start
+          # and the experimentation framework could never learn which
+          # templates/durations actually perform best.
+          if [ -f analytics.json ]; then
+            git add analytics.json
+          fi
+
           git commit -m "chore: update progress [skip ci]" || echo "No changes"
 
           git pull --rebase origin main || true
@@ -113,6 +122,17 @@ jobs:
             git add upload_history.json
           fi
 
+          # upload.py attaches each platform's video/media ID onto the
+          # SAME analytics.json record build_video.py created earlier in
+          # this run (see performance_metadata.attach_platform_ids) —
+          # that happens AFTER the "Commit Progress" step above already
+          # ran, so it must be committed again here or the platform ID
+          # (which analytics_ingest.py needs to fetch real performance
+          # data later) would never make it back to the repo.
+          if [ -f analytics.json ]; then
+            git add analytics.json
+          fi
+
           git commit -m "chore: update upload history [skip ci]" || echo "No changes"
 
           git pull --rebase origin main || true
@@ -126,5 +146,6 @@ jobs:
           path: |
             logs/**
             video_metadata.json
+            analytics.json
           if-no-files-found: ignore
           retention-days: 7
