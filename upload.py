@@ -23,6 +23,7 @@ from config import (
     HASHTAG_POOL, UPLOAD_HISTORY_FILE,
 )
 from logging_utils import get_logger
+from performance_metadata import attach_platform_ids
 
 log = get_logger(__name__)
 
@@ -330,7 +331,7 @@ def already_uploaded(history: dict, video_hash: str) -> bool:
     return any(entry.get("hash") == video_hash for entry in history["uploads"])
 
 
-def record_upload(history: dict, video_hash: str, meta: dict, results: dict) -> None:
+def record_upload(history: dict, video_hash: str, meta: dict, results: dict, upload_state: str) -> None:
     history["uploads"].append({
         "hash": video_hash,
         "title": meta.get("title"),
@@ -338,8 +339,55 @@ def record_upload(history: dict, video_hash: str, meta: dict, results: dict) -> 
         "last_ayah": meta.get("last_ayah"),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "results": results,
+        "upload_state": upload_state,
     })
     save_history(history)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# UPLOAD STATE (item 16: generated / partially_uploaded / fully_uploaded / ...)
+# ══════════════════════════════════════════════════════════════════════════
+
+def compute_upload_state(results: dict, configured: list) -> str:
+    """
+    Reduces per-platform results into one of the states from item 16:
+    "generated" (no platform was even configured this run — nothing to
+    upload), "upload_failed" (every configured platform failed),
+    "partially_uploaded" (some but not all configured platforms
+    succeeded), or "fully_uploaded" (every configured platform
+    succeeded). Per-platform detail (which of youtube/facebook/
+    instagram actually succeeded) is preserved separately in `results`
+    itself — this state is just the roll-up summary.
+    """
+    if not configured:
+        return "generated"
+    succeeded = [p for p in configured if results.get(p)]
+    if not succeeded:
+        return "upload_failed"
+    if len(succeeded) == len(configured):
+        return "fully_uploaded"
+    return "partially_uploaded"
+
+
+def update_metadata_upload_state(metadata_path: Path, meta: dict, results: dict, upload_state: str) -> None:
+    """
+    Writes the upload outcome back into video_metadata.json so it's
+    visible alongside the rest of a video's metadata (item 13/16),
+    without touching any of the fields build_video.py already wrote
+    (surah/ayah/visual template/etc). Failure to write this is logged
+    but never fatal — it must not turn a real upload success into a
+    reported script failure.
+    """
+    try:
+        meta["upload_state"] = upload_state
+        meta["upload_results"] = {
+            "youtube": bool(results.get("youtube")),
+            "facebook": bool(results.get("facebook")),
+            "instagram": bool(results.get("instagram")),
+        }
+        metadata_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as e:
+        log.warning("Could not write upload_state back to %s: %s", metadata_path, e)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -834,37 +882,74 @@ def main():
             sys.exit(0)
 
         results = {"youtube": None, "facebook": None, "instagram": None}
+        configured = []
 
+        # Every platform call below is wrapped in its own try/except
+        # Exception (not just NonRetryableUploadError) — item 16: if
+        # YouTube succeeds but Instagram fails (or vice versa, or
+        # either raises something completely unexpected), the OTHER
+        # platforms must still be attempted with this SAME rendered
+        # video. Nothing here ever triggers a re-render — build_video.py
+        # already advanced progress once this file was validated, and
+        # that is never revisited based on upload outcome.
         if YOUTUBE_REFRESH_TOKEN:
-            results["youtube"] = upload_youtube(video_path, title, description)
+            configured.append("youtube")
+            try:
+                results["youtube"] = upload_youtube(video_path, title, description)
+            except Exception as e:  # noqa: BLE001 — must not block facebook/instagram below
+                log.error("YouTube upload raised an unexpected error (not just failed a retry): %s", e)
         else:
             log.info("YouTube credentials not set — skipping.")
 
         if META_ACCESS_TOKEN and FACEBOOK_PAGE_ID:
+            configured.append("facebook")
             try:
                 validate_facebook_setup()
                 results["facebook"] = upload_facebook(video_path, title, description)
             except NonRetryableUploadError as e:
                 log.error("Facebook upload skipped: %s", e)
+            except Exception as e:  # noqa: BLE001 — must not block instagram below
+                log.error("Facebook upload raised an unexpected error: %s", e)
         else:
             log.info("Facebook credentials not set — skipping.")
 
         if META_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID:
+            configured.append("instagram")
             try:
                 validate_instagram_setup()
                 results["instagram"] = upload_instagram(video_path, description)
             except NonRetryableUploadError as e:
                 log.error("Instagram upload skipped: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.error("Instagram upload raised an unexpected error: %s", e)
         else:
             log.info("Instagram credentials not set — skipping.")
 
-        record_upload(history, video_hash, meta, results)
+        # Attach platform IDs to the SAME analytics.json record
+        # build_video.py created for this video_hash (item 4: real
+        # analytics feedback loop) — this is what lets
+        # analytics_ingest.py later find "uploaded videos with no
+        # performance numbers yet" without any separate mapping file.
+        # Never blocks/fails the upload itself if analytics.json is
+        # unavailable — see attach_platform_ids()'s own error handling.
+        try:
+            attach_platform_ids(video_hash, {
+                "youtube_video_id": results.get("youtube"),
+                "facebook_video_id": results.get("facebook"),
+                "instagram_media_id": results.get("instagram"),
+            })
+        except Exception as e:  # noqa: BLE001 — analytics bookkeeping must never block the upload result
+            log.warning("Failed to attach platform IDs for analytics: %s", e)
 
-        log.info("FINAL SUMMARY | YouTube: %s | Facebook: %s | Instagram: %s",
+        upload_state = compute_upload_state(results, configured)
+        update_metadata_upload_state(METADATA_FILE, meta, results, upload_state)
+        record_upload(history, video_hash, meta, results, upload_state)
+
+        log.info("FINAL SUMMARY | YouTube: %s | Facebook: %s | Instagram: %s | upload_state=%s",
                   results["youtube"] or "FAILED", results["facebook"] or "FAILED",
-                  results["instagram"] or "FAILED")
+                  results["instagram"] or "FAILED", upload_state)
 
-        if not any(results.values()):
+        if upload_state == "upload_failed":
             sys.exit(1)  # every configured platform failed — surface as a CI failure
 
     except Exception as e:  # noqa: BLE001
