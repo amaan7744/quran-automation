@@ -10,10 +10,46 @@ import os
 from pathlib import Path
 
 # ─── OUTPUT VIDEO ────────────────────────────────────────────────────────────
-VIDEO_WIDTH   = 1080
-VIDEO_HEIGHT  = 1920
+# True 2K vertical (1440x2560, 9:16) — see the "2K upgrade" pass notes.
+# This is NOT 1080x1920 upscaled at the end: every stage of the pipeline
+# (background normalization, motion/zoom, color grading, the intro, the
+# final composite) renders at this resolution directly — see
+# ENCODING QUALITY below and the per-module notes in pexels_fetcher.py,
+# video_effects.py, and intro_builder.py for how each stage was updated.
+VIDEO_WIDTH   = 1440
+VIDEO_HEIGHT  = 2560
 VIDEO_FPS     = 60                 # falls back to 30 automatically if source clips are 30fps-only
-TARGET_SIZE_MB = 95                # keep under Meta's 100MB Reels ceiling
+TARGET_SIZE_MB = 95                # keep under Meta's 100MB Reels ceiling (a platform limit, not resolution-dependent)
+
+# ─── ENCODING QUALITY ─────────────────────────────────────────────────────────
+# Two tiers, used consistently across every ffmpeg encode in the repo
+# (item 5 of the 2K pass: "review every FFmpeg encode"):
+#   FINAL_ENCODE_* — passes that produce pixels that ship in the
+#   delivered video: the main composite (background+subtitles+audio),
+#   the intro, and the intro/main join. These get the higher-quality
+#   settings since there's no further re-encode to "make up for it."
+#   INTERMEDIATE_ENCODE_* — per-clip normalization and the background
+#   crossfade-concat. These get re-encoded again by the final composite
+#   regardless, so a faster preset here has a real speed payoff (item
+#   11: GitHub Actions runtime) without being the bottleneck on final
+#   quality — crf is still kept fairly tight (19, not 23+) so this
+#   intermediate stage doesn't introduce its own visible loss.
+# Values are deliberately NOT crf=0-and-preset=veryslow: an absurdly low
+# crf just inflates file size for no visible benefit at social-video
+# viewing sizes (item 5: "do not use an absurdly low CRF").
+FINAL_ENCODE_CRF        = int(os.environ.get("FINAL_ENCODE_CRF", "17"))
+FINAL_ENCODE_PRESET     = os.environ.get("FINAL_ENCODE_PRESET", "slow")
+INTERMEDIATE_ENCODE_CRF    = int(os.environ.get("INTERMEDIATE_ENCODE_CRF", "19"))
+INTERMEDIATE_ENCODE_PRESET = os.environ.get("INTERMEDIATE_ENCODE_PRESET", "faster")
+
+# ─── AUDIO QUALITY ─────────────────────────────────────────────────────────────
+# Item 6: 48kHz / 192-256kbps AAC, no aggressive normalization. This is
+# the container/codec bitrate for the FINAL muxed audio track; the
+# actual loudness target (AUDIO_TARGET_LUFS, further down) is unchanged
+# from before this pass — this section only concerns encode quality,
+# not making the recitation louder/quieter.
+AUDIO_SAMPLE_RATE = 48000
+AUDIO_BITRATE     = os.environ.get("AUDIO_BITRATE", "224k")
 
 # ─── DIRECTORIES ─────────────────────────────────────────────────────────────
 ROOT_DIR       = Path(__file__).parent
@@ -33,51 +69,32 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 PEXELS_SEARCH_URL = "https://api.pexels.com/videos/search"
 
-# Cinematic search queries, grouped by visual mood. A reel should feel like
-# one intentional environment (a "Forest Reel", a "Mountain Reel", etc.),
-# never a random mix of unrelated stock footage — so pexels_fetcher picks
-# ONE theme per reel and only searches within that theme's query list
-# (see pick_theme() in pexels_fetcher.py). Every query is phrased toward
-# cinematic drone/movement footage rather than generic/flat stock shots.
-THEMED_QUERIES = {
-    "forest": [
-        "misty pine forest", "foggy forest morning", "flowing river forest",
-        "peaceful forest path", "rain on leaves macro",
-        "morning sunlight through trees", "bamboo forest wind",
-        "cinematic waterfall forest",
-    ],
-    "mountain": [
-        "cinematic mountain drone", "alpine river drone",
-        "clouds above mountains", "sunrise over mountains",
-        "aerial valley sunrise", "snow covered mountains",
-        "golden hour landscape mountain", "misty mountain peaks",
-    ],
-    "ocean": [
-        "cinematic ocean waves", "aerial coastline drone",
-        "sunset over ocean cliffs", "golden hour beach waves",
-        "tropical beach aerial drone", "ocean waves cliffs sunset",
-    ],
-    "winter": [
-        "snow falling forest", "frozen lake mist",
-        "snow covered mountains drone", "winter fog forest",
-        "aurora sky", "moonlit clouds snow",
-    ],
-    "sky_and_night": [
-        "aurora sky timelapse", "stars timelapse night sky",
-        "moonlit clouds drifting", "clouds timelapse sky",
-        "sunrise golden hour clouds", "night sky stars over mountains",
-    ],
-}
-# Flat fallback list — only used if a themed round comes back completely
-# empty across every theme (extremely unlikely; see collect_clips()).
-NATURE_QUERIES = [q for group in THEMED_QUERIES.values() for q in group]
+# Cinematic search queries are now grouped into a much larger set of
+# visual CATEGORIES (cosmic, night sky, atmospheric light, rain/water,
+# desert, Islamic architecture, abstract spiritual, clouds — plus the
+# original forest/mountain/ocean/winter/sky_and_night, all still fully
+# supported) — see VISUAL_CATEGORIES in visual_themes.py, which is now
+# the single source of truth for query pools, category fallback chains,
+# and mood weighting. A reel still reads as one intentional environment
+# (pexels_fetcher stays on one category per reel — see collect_clips()),
+# it just now has far more environments to draw from.
 
 # Clip selection — only basic ffprobe metadata is checked, no perceptual
 # analysis. A clip is rejected only if: not vertical, resolution below
 # MIN_CLIP_WIDTH x MIN_CLIP_HEIGHT, duration below MIN_CLIP_DURATION, or
 # corrupted/unreadable by ffprobe.
-MIN_CLIP_WIDTH        = 720
-MIN_CLIP_HEIGHT       = 1280
+#
+# Item 3/10 of the 2K pass: "1080p only as a fallback." Raised from the
+# old 720x1280 floor (which matched the old 1080x1920 pipeline) to
+# 1080x1920 — a source clip that's already below standard-HD portrait
+# is genuinely too soft to be a reasonable input for a 2K output and is
+# now rejected outright, rather than silently accepted and stretched up
+# two resolution tiers. 1080p sources are still explicitly ALLOWED as
+# the lowest acceptable fallback tier; search_pexels() separately
+# prefers 2160p/1440p over 1080p whenever the Pexels API offers them —
+# see SOURCE QUALITY TIERS in pexels_fetcher.py.
+MIN_CLIP_WIDTH        = 1080
+MIN_CLIP_HEIGHT       = 1920
 MIN_CLIP_DURATION     = 3
 MAX_CLIP_DURATION     = 30     # upper bound used only to filter Pexels search results
 
@@ -89,19 +106,12 @@ DURATION_BUFFER   = 1.35   # fetch 35% more footage than needed for editing head
 CLIP_TRIM_MIN = 3.0
 CLIP_TRIM_MAX = 5.0
 
-# Subtle, unified cinematic color grade applied identically to every clip
-# (see trim_and_normalize() in pexels_fetcher.py) so forest/mountain/ocean
-# footage from different Pexels sources doesn't jump between warm/cold or
-# flat/saturated looks. Deliberately gentle — this is a light grade, not a
-# heavy LUT; the beauty should still come from the footage itself.
-GRADE_CONTRAST   = 1.04
-GRADE_SATURATION = 0.94
-GRADE_BRIGHTNESS = 0.01
-# Slight lift of shadows toward cool/teal and highlights toward warm —
-# the classic gentle cinematic split-tone, kept subtle enough to be felt
-# rather than seen.
-GRADE_SHADOW_WARMTH   = -0.02   # negative = slightly cooler shadows
-GRADE_HIGHLIGHT_WARMTH = 0.02   # positive = slightly warmer highlights
+# Per-clip color grade is now one of several named cinematic presets
+# (deep_night, midnight_blue, warm_gold, moonlight, neutral_cinematic,
+# soft_teal, dawn, desert_warmth — item 9) selected per visual template
+# — see COLOR_GRADES in visual_themes.py. All are deliberately gentle
+# (light grades, not heavy LUTs); the beauty should still come from the
+# footage itself.
 
 # ─── VIDEO EDITING (transitions) ─────────────────────────────────────────────
 TRANSITION_DURATION = 0.35    # seconds — premium subtle crossfade (~250-400ms target)
@@ -132,3 +142,149 @@ HASHTAG_POOL = [
     "#Deen", "#Iman", "#Tawheed", "#IslamicQuotes", "#QuranicVerses",
     "#Alhamdulillah", "#SubhanAllah", "#Allah", "#IslamicVideo", "#Reels",
 ]
+
+# ─── CINEMATIC OPENING / BISMILLAH INTRO ──────────────────────────────────────
+# See intro_builder.py for the full implementation. This section only
+# controls whether/how the intro is built — it never touches subtitles
+# or the main recitation audio/video, which are built and validated
+# completely independently and then concatenated with the intro as the
+# very last step.
+INTRO_ENABLED = os.environ.get("INTRO_ENABLED", "true").lower() not in ("0", "false", "no")
+
+# Preferred order (item 18):
+#   1. BISMILLAH_AUDIO_PATH, if it points to an existing local file
+#      (pre-recorded/licensed audio you supply yourself).
+#   2. (same mechanism — just point BISMILLAH_AUDIO_PATH at whichever
+#      licensed recording you want to use; there is no separate code
+#      path for "licensed" vs "existing local" since both are just a
+#      file on disk).
+#   3. BISMILLAH_TTS_ENABLED gTTS fallback, if the local file is missing
+#      AND this is turned on (off by default — requires network access
+#      to Google Translate's TTS endpoint and produces a synthesized,
+#      not human-recited, voice; review the output before relying on it
+#      for a public channel).
+# If neither source is available, the intro is skipped entirely for
+# that run (logged clearly) rather than fabricating or downloading
+# unlicensed audio — see intro_builder.py.
+BISMILLAH_AUDIO_PATH = os.environ.get("BISMILLAH_AUDIO_PATH", str(ROOT_DIR / "assets" / "bismillah.mp3"))
+BISMILLAH_TTS_ENABLED = os.environ.get("BISMILLAH_TTS_ENABLED", "false").lower() in ("1", "true", "yes")
+BISMILLAH_TTS_CACHE_PATH = ROOT_DIR / ".cache" / "bismillah_tts.mp3"
+BISMILLAH_TEXT_ARABIC = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ"
+
+# Hard bounds on the whole opening sequence (black -> stars/light ->
+# Bismillah). Tightened per the "strict intro timing" pass: the target
+# is now an extremely short ~1.0-1.5s open, not a 2-4s cinematic intro —
+# the viewer should feel an almost immediate transition into the Quran.
+# INTRO_TARGET_MAX_DURATION is the soft aim the code tries to land on
+# by padding minimally around the actual Bismillah audio (never by
+# speeding up or trimming the phrase itself). INTRO_HARD_DURATION_CEILING
+# is not a cap that gets enforced by cutting anything — it's the point
+# past which a longer-than-normal Bismillah recording gets a loud log
+# recommending a shorter clip, while still playing in full.
+INTRO_MIN_DURATION = 0.9
+INTRO_TARGET_MAX_DURATION = 1.5
+INTRO_MAX_DURATION = INTRO_TARGET_MAX_DURATION  # kept as an alias: some callers/docs still refer to this name
+INTRO_HARD_DURATION_CEILING = 2.2
+# Brief silent black beat before the Bismillah audio starts (item 3:
+# "0.0-0.25 sec: black"), so the opening always reads as a deliberate
+# beat of stillness rather than audio starting instantly at frame 0.
+INTRO_PRE_BLACK = 0.20
+INTRO_AUDIO_FADE_OUT = 0.12   # short tail fade so the cut into the main recitation is clean
+INTRO_VISUAL_FPS = VIDEO_FPS
+# Sanity ceiling, independent of the durations above: if the resolved
+# Bismillah audio is longer than this, something is almost certainly
+# misconfigured (wrong file pointed to by BISMILLAH_AUDIO_PATH, a full
+# reciter track instead of just the Bismillah phrase, etc). Rather than
+# building a multi-second-long "intro" that would badly hurt retention,
+# the intro is skipped entirely and this is logged loudly — see
+# intro_builder.resolve_bismillah_audio(). Tightened from 6.0s to 3.0s
+# now that the target intro is ~1.0-1.5s: a "short Bismillah clip" that
+# is itself already 3+ seconds long is not a short clip.
+INTRO_AUDIO_SANITY_CEILING = 3.0
+# Length of the cinematic crossfade joining the intro into the main
+# recitation segment (video dissolve + audio crossfade). Shortened
+# alongside the overall intro so the Quran recitation is clearly
+# underway within ~1.0-1.5s of the video starting, not competing with a
+# long dissolve.
+INTRO_JOIN_TRANSITION = 0.20
+
+# ─── STAR FIELD (item 1 of the final quality pass) ────────────────────────────
+# A genuinely sparse point star field, NOT film-grain/noise presented as
+# stars. Generated once per render as a small procedural pattern (see
+# intro_builder._build_star_field) and upscaled with a soft blur so each
+# point reads as a tiny soft glow rather than a hard pixel or a dense
+# "static" texture. Values below are baselines; intro_builder jitters
+# them slightly (within *_JITTER) on every render so consecutive videos
+# aren't visually identical while keeping the same recognizable
+# structure (item 8).
+INTRO_STAR_PROBABILITY = 0.0018      # ~35 points on the generation grid — sparse, not a constellation
+INTRO_STAR_PROBABILITY_JITTER = 0.0005
+INTRO_STAR_OPACITY_RANGE = (0.35, 0.60)   # most of the field stays this subtle even at full fade-in
+INTRO_LIGHT_LIFT_RANGE = (0.03, 0.07)     # the very slight overall brightness lift near the end
+
+# ─── VISUAL MOOD ENGINE / EXPERIMENTATION (items 3, 13, 14) ───────────────────
+ANALYTICS_FILE = ROOT_DIR / "analytics.json"
+
+# "70-80% proven formats / 20-30% experiments" (item 14), gated by
+# statistical confidence (item 5 of the final quality pass — see
+# performance_metadata.confidence_tier). These thresholds are counts of
+# VIDEOS carrying a given template/bucket that have received a real
+# performance score — never raw view/like counts — so one breakout
+# video can't single-handedly make a template "proven."
+#   < WEAK_SIGNAL_THRESHOLD                    -> exploration only
+#   WEAK_SIGNAL_THRESHOLD..MIN_SAMPLES_TO_TRUST -> weak signal (partially trusted)
+#   MIN_SAMPLES_TO_TRUST..STRONG_SIGNAL_THRESHOLD -> usable signal (fully trusted)
+#   >= STRONG_SIGNAL_THRESHOLD                 -> stronger signal (fully trusted)
+EXPERIMENT_EXPLOIT_RATIO = float(os.environ.get("EXPERIMENT_EXPLOIT_RATIO", "0.75"))
+WEAK_SIGNAL_THRESHOLD = int(os.environ.get("WEAK_SIGNAL_THRESHOLD", "5"))
+MIN_SAMPLES_TO_TRUST = int(os.environ.get("MIN_SAMPLES_TO_TRUST", "10"))
+STRONG_SIGNAL_THRESHOLD = int(os.environ.get("STRONG_SIGNAL_THRESHOLD", "20"))
+# How much of the base exploit ratio a "weak" signal (5-9 samples) is
+# allowed to use — e.g. 0.3 means a weak-signal winner is only exploited
+# 0.75*0.3 = 22.5% of the time (vs the full 75% once "usable"/"strong"),
+# so it nudges selection without letting a handful of early videos lock
+# in a false winner.
+WEAK_SIGNAL_EXPLOIT_SCALE = float(os.environ.get("WEAK_SIGNAL_EXPLOIT_SCALE", "0.3"))
+
+# ─── PERFORMANCE SCORE (item 6) ────────────────────────────────────────────────
+# Weights for compute_performance_score() in performance_metadata.py —
+# kept here, in one visible place, rather than hardcoded inside the
+# scoring function, so the calculation stays fully inspectable/tunable.
+# Must sum to 1.0 (renormalized automatically over whichever components
+# are actually available for a given video — see that function).
+PERFORMANCE_SCORE_WEIGHTS = {
+    "retention": 0.50,    # average percentage viewed — the primary signal
+    "pace": 0.25,         # views/day relative to the channel's recent baseline (age-normalized)
+    "subscriber": 0.15,   # subscriber conversion
+    "engagement": 0.10,   # likes+comments per view
+}
+
+# ─── DURATION EXPERIMENTATION (item 12) ────────────────────────────────────────
+# Named duration buckets: (target_max, hard_max) seconds. Ayah integrity
+# always wins — build_video.fit_batch_to_duration() never splits an
+# ayah regardless of which bucket is chosen, so a bucket is a soft aim,
+# not a hard cut point.
+DURATION_BUCKETS = {
+    "short_18_25":  (25.0, 28.0),
+    "medium_25_32": (32.0, 36.0),
+    "long_32_40":   (40.0, 45.0),
+}
+
+# ─── ANALYTICS INGESTION (item 4) ──────────────────────────────────────────────
+# See analytics_ingest.py. This is a SEPARATE, standalone script — not
+# run as part of build_video.py or upload.py — meant to be scheduled
+# independently (e.g. a second, daily GitHub Actions workflow) since
+# YouTube's own numbers (especially Analytics API metrics like average
+# view percentage) need time to stabilize after upload.
+#
+# Requires a YouTube Data API v3 key/OAuth token (view counts/likes/
+# comments — the same YOUTUBE_REFRESH_TOKEN used for upload.py already
+# covers this) AND, for average-view-duration/percentage/subscribers-
+# gained specifically, an OAuth token with the additional
+# 'https://www.googleapis.com/auth/yt-analytics.readonly' scope — NOT
+# automatically granted by the upload scope alone. If that broader
+# scope isn't present, analytics_ingest.py marks those specific fields
+# unavailable (never fabricated) and still records whatever it could
+# get from the public Data API.
+ANALYTICS_MIN_VIDEO_AGE_HOURS = float(os.environ.get("ANALYTICS_MIN_VIDEO_AGE_HOURS", "24"))
+YOUTUBE_CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "")
