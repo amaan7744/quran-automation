@@ -1,0 +1,78 @@
+name: Quran Analytics Ingestion
+
+# Item 4 of the final quality pass: the real analytics feedback loop.
+# Deliberately a SEPARATE, independently-scheduled workflow from the
+# build/upload one (main.yml) — YouTube's own numbers (especially
+# Analytics API metrics like average view percentage) need time to
+# stabilize after upload, and analytics_ingest.py already enforces a
+# minimum video age (ANALYTICS_MIN_VIDEO_AGE_HOURS) before touching a
+# video, so re-running this daily rather than on every build/upload is
+# both more correct and far less wasteful.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # once a day; adjust freely — analytics_ingest.py is idempotent-safe to run more or less often
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch and score but don't write results into analytics.json"
+        type: boolean
+        default: false
+
+concurrency:
+  group: quran-analytics-ingestion
+  cancel-in-progress: false
+
+jobs:
+  ingest-analytics:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ingest Analytics
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          # Required in addition to the three above, ONLY for the
+          # retention/subscriber metrics (average view duration/
+          # percentage, subscribers gained) — see config.py's
+          # ANALYTICS INGESTION notes. Public view/like/comment counts
+          # work without it. Set this as a repo/environment Variable
+          # (not a secret — it's not sensitive), or the ingestion still
+          # runs and simply leaves those specific fields unavailable.
+          YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python analytics_ingest.py --dry-run
+          else
+            python analytics_ingest.py
+          fi
+
+      - name: Commit Updated Analytics
+        if: success() && inputs.dry_run != true
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "github-actions[bot]"
+
+          if [ -f analytics.json ]; then
+            git add analytics.json
+          fi
+
+          git commit -m "chore: ingest analytics [skip ci]" || echo "No changes"
+
+          git pull --rebase origin main || true
+          git push origin HEAD:main
