@@ -2,14 +2,27 @@
 """
 build_video.py
 Orchestrates the full pipeline: fetch ayah audio -> master audio ->
-build karaoke subtitles -> fetch/edit a moving nature background ->
-composite the final 1080x1920 video -> write metadata for upload.py.
+build karaoke subtitles -> pick a visual mood/template and build the
+matching cinematic background -> composite the main video -> build and
+join a cinematic Bismillah intro -> run the QA gate -> write extended
+metadata for upload.py.
 
 SCOPE NOTE: subtitle placement/styling/karaoke direction and deep audio
 mastering are owned by subtitle_builder.py and audio_processor.py
 respectively — this file only calls into them and composites their
 output. Anything requiring changes to *what* the subtitles look like or
 *how* the recitation is mastered belongs in those modules, not here.
+subtitle_builder.py is frozen for this upgrade: this file consumes its
+output exactly as before and does not alter its behavior or timing.
+
+INTRO NOTE: the main video (background + burned-in subtitles + mastered
+recitation audio) is built and QA'd as its own complete, correctly-
+timed segment FIRST, exactly as it always was. The cinematic intro is
+built completely separately and only joined onto the front of that
+already-finished segment as the very last step (see intro_builder.py).
+This ordering is what guarantees the intro can never affect subtitle
+timing — subtitles are already burned-in pixels by the time the intro
+exists at all.
 """
 
 import json
@@ -21,10 +34,18 @@ import time
 from pathlib import Path
 
 from audio_downloader import get_next_batch, download_batch, concat_audio, save_progress
-from pexels_fetcher import build_background, PexelsError
 from subtitle_builder import build_subtitles, get_ayah_text
 from audio_processor import master_audio
-from config import VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, TARGET_SIZE_MB
+from visual_engine import choose_plan, build_background_for_plan
+from intro_builder import build_intro, join_intro_and_main, IntroBuildError
+from performance_metadata import build_metadata, record_generation, pick_duration_bucket, compute_video_hash
+import qa_gate
+import config
+from config import (
+    VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, TARGET_SIZE_MB, INTRO_ENABLED, INTRO_JOIN_TRANSITION,
+    FINAL_ENCODE_CRF, FINAL_ENCODE_PRESET, AUDIO_BITRATE, AUDIO_SAMPLE_RATE,
+)
+from pexels_fetcher import PexelsError
 from logging_utils import get_logger
 
 log = get_logger(__name__)
@@ -40,15 +61,23 @@ MAX_STAGE_RETRIES = 2
 # Premium Quran Shorts/Reels stay short. Rather than always rendering a
 # fixed ayah count, we fetch the usual batch and then keep only a
 # Quran-ordered PREFIX of it that fits this window — never skipping,
-# never repeating, never splitting an ayah mid-way.
-TARGET_MAX_DURATION = 40.0   # aim to stop growing the batch around here
-HARD_MAX_DURATION   = 45.0   # never exceed this except for a single long ayah
+# never repeating, never splitting an ayah mid-way. The actual
+# target/hard-max window is now chosen per-run by
+# performance_metadata.pick_duration_bucket() (item 12: duration
+# experimentation) instead of a single fixed constant; these two
+# remain as the ultimate safety fallback if that selection ever fails.
+DEFAULT_TARGET_MAX_DURATION = 40.0
+DEFAULT_HARD_MAX_DURATION   = 45.0
 
 # ─── VISUAL POLISH ────────────────────────────────────────────────────────
-# Slow, duration-normalized Ken Burns zoom applied to the background during
-# the final composite. Subtle by design — see build_video_filter().
+# Slow, duration-normalized Ken Burns zoom applied to the ENTIRE
+# composited background during the final render, layered on top of the
+# per-clip motion styles the visual engine already applied to each
+# individual clip (item 8). Kept intentionally tiny — the per-clip
+# motion is now doing most of the visual-variety work; this is just a
+# whole-video finishing touch, not the main source of movement anymore.
 ENABLE_CINEMATIC_ZOOM = True
-CINEMATIC_ZOOM_MAX    = 1.03  # ~3% zoom over the full clip — almost invisible, never more
+CINEMATIC_ZOOM_MAX    = 1.02  # ~2% zoom over the full clip — smaller than before since clips already move
 
 
 def load_json(path: Path):
@@ -83,10 +112,13 @@ def detect_hw_encoder() -> str:
     return "libx264"
 
 
-def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list):
+def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list,
+                           target_max: float, hard_max: float):
     """
-    Enforces the 30-40s (45s hard cap) target Reel length by keeping only
-    a Quran-ordered PREFIX of the fetched batch. Ayahs beyond the cap are
+    Enforces the target Reel length (item 12: duration experimentation —
+    target_max/hard_max are chosen per-run by
+    performance_metadata.pick_duration_bucket()) by keeping only a
+    Quran-ordered PREFIX of the fetched batch. Ayahs beyond the cap are
     simply left unused this run — save_progress() only advances to the
     last ayah actually included, so nothing is skipped, split, or
     repeated; the remainder is picked up on the next run.
@@ -101,24 +133,24 @@ def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list)
     cumulative = audio_durations[0]
     for i in range(1, len(batch)):
         projected = cumulative + audio_durations[i]
-        if projected > HARD_MAX_DURATION:
+        if projected > hard_max:
             break
         cumulative = projected
         kept += 1
-        if cumulative >= TARGET_MAX_DURATION:
+        if cumulative >= target_max:
             break
 
     if kept < len(batch):
         log.info(
             "Trimming batch from %d to %d ayah(s) to stay within the %.0fs Reel target "
             "(%.1fs -> %.1fs). Remaining ayah(s) carry over to the next run.",
-            len(batch), kept, HARD_MAX_DURATION, sum(audio_durations), cumulative,
+            len(batch), kept, hard_max, sum(audio_durations), cumulative,
         )
-    if cumulative > HARD_MAX_DURATION:
+    if cumulative > hard_max:
         log.warning(
             "Ayah %s:%s alone is %.1fs, exceeding the %.0fs target — keeping it "
             "uncut since ayahs are never split.",
-            batch[0][0], batch[0][1], cumulative, HARD_MAX_DURATION,
+            batch[0][0], batch[0][1], cumulative, hard_max,
         )
 
     return batch[:kept], audio_files[:kept], audio_durations[:kept]
@@ -126,13 +158,14 @@ def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list)
 
 def build_video_filter(with_zoom: bool, total_duration: float) -> str:
     """
-    Builds the ffmpeg -vf chain for the final composite: fit to the target
-    canvas, optionally apply a slow cinematic zoom, then burn in subtitles.
+    Builds the ffmpeg -vf chain for the main-segment composite: fit to
+    the target canvas, optionally apply a slow whole-video cinematic
+    zoom, then burn in subtitles.
 
-    The zoom rate is derived from total_duration so a 30s Reel and a 45s
-    Reel both reach CINEMATIC_ZOOM_MAX exactly by the final frame, rather
-    than zooming at a fixed per-frame rate that would look faster/slower
-    depending on ayah length.
+    The zoom rate is derived from total_duration so a short Reel and a
+    long Reel both reach CINEMATIC_ZOOM_MAX exactly by the final frame,
+    rather than zooming at a fixed per-frame rate that would look
+    faster/slower depending on ayah length.
     """
     filters = [
         f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase",
@@ -162,39 +195,47 @@ def _run_render(bg_path: Path, audio_path: Path, total_duration: float,
         # Single-pass loudness normalization to the standard short-form
         # social target (~-14 LUFS). This is a final polish pass only —
         # real mastering (de-essing, warmth, harshness removal) happens
-        # upstream in audio_processor.master_audio().
+        # upstream in audio_processor.master_audio(); TP=-1.5 keeps a
+        # true-peak safety margin so this pass never introduces
+        # clipping (item 6: "do not introduce clipping").
         "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", str(AUDIO_SAMPLE_RATE),
         "-movflags", "+faststart", "-shortest", str(out_path),
     ]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def merge_final_video(bg_path: Path, audio_path: Path, subtitle_path: Path,
-                       out_path: Path, total_duration: float) -> None:
-    """Composites background + subtitles + mastered audio into the final deliverable."""
+def merge_main_segment(bg_path: Path, audio_path: Path, subtitle_path: Path,
+                        out_path: Path, total_duration: float) -> None:
+    """Composites background + subtitles + mastered audio into the main
+    segment (the part whose timing is subtitle-critical — see module
+    docstring). This is the single most important encode in the whole
+    pipeline — it's where the subtitles actually get burned in and
+    where the 2K background, motion, and color grading all become
+    final pixels — so it always uses FINAL_ENCODE_CRF/PRESET (item 5 of
+    the 2K pass), not the faster/lossier settings used for the
+    intermediate per-clip and crossfade passes upstream."""
     safe_sub = Path("/tmp/subs.ass")
     shutil.copy(subtitle_path, safe_sub)
 
     max_bitrate = int((TARGET_SIZE_MB * 8192) / total_duration)
     encoder = detect_hw_encoder()
     codec_args = (
-        ["-c:v", "libx264", "-preset", "slow", "-crf", "20"]
+        ["-c:v", "libx264", "-preset", FINAL_ENCODE_PRESET, "-crf", str(FINAL_ENCODE_CRF)]
         if encoder == "libx264"
-        # Hardware encoders don't support CRF the same way — drive with bitrate instead.
         else ["-c:v", encoder, "-b:v", f"{max_bitrate}k"]
     )
 
     video_filter = build_video_filter(with_zoom=ENABLE_CINEMATIC_ZOOM, total_duration=total_duration)
 
-    log.info("Rendering final video (%dx%d @ %dfps, encoder=%s, zoom=%s, target <%dMB)...",
+    log.info("Rendering main segment (%dx%d @ %dfps, encoder=%s, zoom=%s, target <%dMB)...",
               VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS, encoder, ENABLE_CINEMATIC_ZOOM, TARGET_SIZE_MB)
     result = _run_render(bg_path, audio_path, total_duration, video_filter, codec_args, max_bitrate, out_path)
 
     if result.returncode != 0 and encoder != "libx264":
         log.warning("Hardware encode failed, retrying with libx264: %s", result.stderr[-300:])
         encoder = "libx264"
-        codec_args = ["-c:v", "libx264", "-preset", "slow", "-crf", "20"]
+        codec_args = ["-c:v", "libx264", "-preset", FINAL_ENCODE_PRESET, "-crf", str(FINAL_ENCODE_CRF)]
         result = _run_render(bg_path, audio_path, total_duration, video_filter, codec_args, max_bitrate, out_path)
 
     if result.returncode != 0 and ENABLE_CINEMATIC_ZOOM:
@@ -206,82 +247,7 @@ def merge_final_video(bg_path: Path, audio_path: Path, subtitle_path: Path,
         raise RuntimeError(f"FFmpeg render failed: {result.stderr[-500:]}")
 
     size_mb = out_path.stat().st_size / 1024 / 1024
-    log.info("Final video size: %.1f MB", size_mb)
-
-
-def validate_batch_text(batch: list, arabic_data, english_data) -> None:
-    """
-    Guards against silently uploading a video whose Arabic/translation text
-    doesn't actually correspond to the audio being recited — e.g. a bad
-    lookup key, a gap in the JSON source, or a typo'd surah/ayah number.
-    Every single ayah in the batch must resolve to non-empty text in BOTH
-    sources before we spend time rendering anything.
-    """
-    missing = []
-    for surah, ayah in batch:
-        if not get_ayah_text(arabic_data, surah, ayah):
-            missing.append(f"{surah}:{ayah} (arabic)")
-        if not get_ayah_text(english_data, surah, ayah):
-            missing.append(f"{surah}:{ayah} (english)")
-    if missing:
-        raise RuntimeError(
-            f"Ayah/translation text missing for: {', '.join(missing)}. "
-            "Refusing to build a video with mismatched or missing text."
-        )
-    log.info("Validated Arabic + English text present for all %d ayah(s) in batch.", len(batch))
-
-
-def probe_video(path: Path) -> dict:
-    """Returns {width, height, duration, has_audio} for a rendered mp4."""
-    r = subprocess.run(
-        ["ffprobe", "-v", "error", "-print_format", "json",
-         "-show_streams", "-show_format", str(path)],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(f"ffprobe failed on {path}: {r.stderr[-300:]}")
-    info = json.loads(r.stdout)
-    streams = info.get("streams", [])
-    v = next((s for s in streams if s.get("codec_type") == "video"), {})
-    has_audio = any(s.get("codec_type") == "audio" for s in streams)
-    return {
-        "width": v.get("width"),
-        "height": v.get("height"),
-        "duration": float(info.get("format", {}).get("duration", 0.0)),
-        "has_audio": has_audio,
-    }
-
-
-def validate_final_output(out_path: Path, subtitle_path: Path, expected_duration: float) -> None:
-    """
-    Final quality gate: the pipeline must NOT hand a video to upload.py
-    unless it actually looks right. Checks correct resolution, presence
-    of an audio track, duration matching what the ayah audio should be,
-    and a non-empty subtitle track (so we never publish a silent/blank
-    or badly-cropped video, or one whose subtitles failed to render).
-    """
-    if not out_path.exists() or out_path.stat().st_size < 100_000:
-        raise RuntimeError(f"Final video missing or suspiciously small: {out_path}")
-
-    info = probe_video(out_path)
-    if info["width"] != VIDEO_WIDTH or info["height"] != VIDEO_HEIGHT:
-        raise RuntimeError(
-            f"Final video resolution {info['width']}x{info['height']} != "
-            f"expected {VIDEO_WIDTH}x{VIDEO_HEIGHT}"
-        )
-    if not info["has_audio"]:
-        raise RuntimeError("Final video has no audio stream.")
-    if abs(info["duration"] - expected_duration) > 1.5:
-        raise RuntimeError(
-            f"Final video duration {info['duration']:.2f}s doesn't match "
-            f"expected recitation duration {expected_duration:.2f}s — "
-            "possible audio/video desync."
-        )
-    if not subtitle_path.exists() or subtitle_path.stat().st_size < 50:
-        raise RuntimeError("Subtitle file is missing or empty.")
-
-    log.info("Validation passed: %dx%d, %.2fs, audio present, subtitles present.",
-              info["width"], info["height"], info["duration"])
+    log.info("Main segment size: %.1f MB", size_mb)
 
 
 def with_retries(stage_name: str, fn, *args, **kwargs):
@@ -297,6 +263,13 @@ def with_retries(stage_name: str, fn, *args, **kwargs):
     raise RuntimeError(f"Stage '{stage_name}' failed after retries: {last_error}") from last_error
 
 
+def _duration_bucket_name(target_max: float, hard_max: float) -> str:
+    for name, (t, h) in config.DURATION_BUCKETS.items():
+        if (t, h) == (target_max, hard_max):
+            return name
+    return "custom"
+
+
 def main():
     with tempfile.TemporaryDirectory() as _tmp:
         tmpdir = Path(_tmp)
@@ -304,13 +277,24 @@ def main():
         english_data = load_json(ENGLISH_JSON)
 
         batch, surah_en, surah_ar = get_next_batch()
-        validate_batch_text(batch, arabic_data, english_data)
+        qa_gate.validate_batch_text(batch, arabic_data, english_data)
 
         audio_files, audio_durations = with_retries("download audio", download_batch, batch, tmpdir)
 
-        # Keep only a Quran-ordered prefix of the batch so the final Reel
-        # stays within the 30-40s (45s hard cap) target. See docstring.
-        batch, audio_files, audio_durations = fit_batch_to_duration(batch, audio_files, audio_durations)
+        # Duration experimentation (item 12): pick a target/hard-max
+        # window for this run, biased toward whatever has actually
+        # performed best once there's enough data — see
+        # performance_metadata.pick_duration_bucket(). Ayah integrity
+        # always wins regardless of which bucket comes back.
+        try:
+            target_max, hard_max = pick_duration_bucket()
+        except Exception as e:  # noqa: BLE001 — never let experimentation bookkeeping block a render
+            log.warning("Duration bucket selection failed (%s) — using default window.", e)
+            target_max, hard_max = DEFAULT_TARGET_MAX_DURATION, DEFAULT_HARD_MAX_DURATION
+
+        batch, audio_files, audio_durations = fit_batch_to_duration(
+            batch, audio_files, audio_durations, target_max, hard_max,
+        )
         total_duration = sum(audio_durations)
 
         raw_audio = tmpdir / "combined_audio_raw.mp3"
@@ -319,32 +303,106 @@ def main():
         mastered_audio = tmpdir / "combined_audio.aac"
         with_retries("master audio", master_audio, raw_audio, mastered_audio, total_duration)
 
+        # Subtitles: frozen subsystem, called exactly as before this
+        # upgrade with no changes to its inputs, outputs, or timing.
         subtitle_file = tmpdir / "subtitles.ass"
         build_subtitles(batch, arabic_data, english_data, audio_durations, subtitle_file)
 
+        # Visual mood engine (item 3): pick a mood from the batch's
+        # English translation text, then a template/category/motion/
+        # color-grade/transition plan to match.
+        english_texts = [get_ayah_text(english_data, s, a) for s, a in batch]
+        plan = choose_plan(english_texts)
+
         bg_path = tmpdir / "background.mp4"
         try:
-            with_retries("build background", build_background, total_duration, tmpdir, bg_path)
+            bg_result = with_retries(
+                "build background", build_background_for_plan, plan, total_duration, tmpdir, bg_path,
+            )
         except PexelsError as e:
             log.error("Background pipeline exhausted retries: %s", e)
             raise
+        motion_styles_used = bg_result["motion_styles"]
+        source_clips = bg_result["source_clips"]
 
-        merge_final_video(bg_path, mastered_audio, subtitle_file, OUTPUT_VIDEO, total_duration)
+        main_segment = tmpdir / "main_segment.mp4"
+        merge_main_segment(bg_path, mastered_audio, subtitle_file, main_segment, total_duration)
 
-        # Quality gate — never write metadata / advance progress / hand a
-        # video to upload.py unless the rendered file actually checks out.
-        validate_final_output(OUTPUT_VIDEO, subtitle_file, total_duration)
+        # QA the main segment BEFORE anything intro-related touches it —
+        # this is what actually guarantees subtitle sync, independent of
+        # whatever the intro does.
+        qa_gate.validate_main_segment(main_segment, subtitle_file, total_duration)
 
+        # Cinematic Bismillah intro (item 1) — built and joined on only
+        # after the main segment is already complete and validated. See
+        # intro_builder.py and the module docstring above for why this
+        # ordering can never affect subtitle timing.
+        intro_info = None
+        final_duration = total_duration
+        if INTRO_ENABLED:
+            try:
+                intro_path = tmpdir / "intro.mp4"
+                intro_info = with_retries("build intro", build_intro, tmpdir, intro_path)
+            except IntroBuildError as e:
+                log.warning("Intro build failed (%s) — continuing without an intro this run.", e)
+                intro_info = None
+
+        if intro_info:
+            join_intro_and_main(intro_info["path"], intro_info["duration"], main_segment, OUTPUT_VIDEO)
+            # A crossfade join overlaps the tail of the intro with the
+            # head of the main segment, so the combined duration is
+            # slightly less than the simple sum.
+            final_duration = total_duration + intro_info["duration"] - INTRO_JOIN_TRANSITION
+        else:
+            shutil.copy(main_segment, OUTPUT_VIDEO)
+
+        # Final QA gate (item 17) — never write metadata / advance
+        # progress / hand a video to upload.py unless the rendered file
+        # actually checks out end to end.
+        qa_gate.validate_final_deliverable(OUTPUT_VIDEO, subtitle_file, final_duration)
+
+        title = f"Surah {surah_en} {batch[0][0]}:{batch[0][1]}-{batch[-1][1]} | Quran"
+
+        # Canonical video identity (item 4: real analytics feedback
+        # loop) — a sha256 of the FINAL rendered file, computed once
+        # here and reused by upload.py for the exact same file, so a
+        # video's generation record, its platform ID, and its eventual
+        # real performance numbers all key off one consistent value
+        # with no fragile title-matching.
+        try:
+            video_hash = compute_video_hash(OUTPUT_VIDEO)
+        except OSError as e:
+            log.warning("Could not hash %s for analytics (%s) — analytics linkage will be skipped this run.",
+                        OUTPUT_VIDEO, e)
+            video_hash = ""
+
+        metadata = build_metadata(
+            surah_num=batch[0][0], surah_name=surah_en,
+            first_ayah=batch[0][1], last_ayah=batch[-1][1],
+            duration=final_duration, video_file=str(OUTPUT_VIDEO),
+            visual_template=plan["visual_template"], visual_mood=plan["mood"],
+            visual_category=plan["visual_category"], motion_styles=motion_styles_used,
+            transition_style=plan["transition_style"], color_grade=plan["color_grade"],
+            intro_enabled=intro_info is not None,
+            intro_duration=intro_info["duration"] if intro_info else 0.0,
+            duration_bucket=_duration_bucket_name(target_max, hard_max), title=title,
+            video_hash=video_hash,
+            render_width=VIDEO_WIDTH, render_height=VIDEO_HEIGHT,
+            source_clips=source_clips, codec="h264", pixel_format="yuv420p", audio_codec="aac",
+        )
         with open(METADATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "title": f"Surah {surah_en} {batch[0][0]}:{batch[0][1]}-{batch[-1][1]} | Quran",
-                "surah_num": batch[0][0],
-                "surah_name": surah_en,
-                "last_ayah": batch[-1][1],
-                "first_ayah": batch[0][1],
-                "video_file": str(OUTPUT_VIDEO),
-                "duration": total_duration,
-            }, f, indent=2)
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        # Record this render for the experimentation framework (item 14).
+        # A real performance number isn't available yet at generation
+        # time — see performance_metadata.record_performance() and
+        # analytics_ingest.py for the separate, standalone step that
+        # fetches real platform numbers later and calls it.
+        if video_hash:
+            try:
+                record_generation(video_hash, metadata)
+            except Exception as e:  # noqa: BLE001 — analytics bookkeeping must never block a render
+                log.warning("Failed to record generation metadata for analytics: %s", e)
 
         # CRITICAL: advance progress as soon as a *validated* video exists,
         # not after upload.py runs. Progress must never depend on whether
@@ -356,7 +414,9 @@ def main():
         # correctly picked up on the next run rather than skipped.
         save_progress(batch[0][0], batch[-1][1])
 
-        log.info("Pipeline complete: Surah %s %d:%d-%d", surah_en, batch[0][0], batch[0][1], batch[-1][1])
+        log.info("Pipeline complete: Surah %s %d:%d-%d (mood=%s, template=%s, intro=%s)",
+                  surah_en, batch[0][0], batch[0][1], batch[-1][1],
+                  plan["mood"], plan["visual_template"], intro_info is not None)
 
 
 if __name__ == "__main__":
