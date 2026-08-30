@@ -27,7 +27,11 @@ log = get_logger(__name__)
 RECITER_FOLDER  = "Saood_ash-Shuraym_128kbps"
 RECITER_NAME    = "Saud Al-Shuraim"
 EVERYAYAH_BASE  = "https://everyayah.com/data"
-AYAH_PER_VIDEO  = 7
+AYAH_PER_VIDEO  = 20  # generous fetch pool (upper bound) — build_video.py's
+                      # fit_batch_to_duration() trims this down to whatever
+                      # real ayah count lands the video in the 25-35s target
+                      # window, so this just needs to be large enough that
+                      # the pool almost always reaches 25s+ once downloaded.
 SMALL_SURAH_MAX = 10
 PROGRESS_FILE   = Path("progress.json")
 
