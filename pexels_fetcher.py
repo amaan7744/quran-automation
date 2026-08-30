@@ -116,6 +116,9 @@ from config import (
     QUERIES_PER_RUN, DURATION_BUFFER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
     CLIP_TRIM_MIN, CLIP_TRIM_MAX, VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS,
     TRANSITION_DURATION, INTERMEDIATE_ENCODE_CRF, INTERMEDIATE_ENCODE_PRESET,
+    ADAPTIVE_EXPOSURE_ENABLED, TARGET_AVERAGE_LUMA, DARK_SOURCE_LUMA_FLOOR,
+    MAX_BRIGHTNESS_PULLDOWN, MAX_SHADOW_PROTECT_LIFT,
+    MAX_HIGHLIGHT_GAMMA_PULLBACK, MAX_BRIGHT_SATURATION_PULLBACK,
 )
 from visual_themes import VISUAL_CATEGORIES, COLOR_GRADES
 from logging_utils import get_logger
@@ -434,13 +437,84 @@ def collect_clips(total_duration: float, tmpdir: Path, category_chain: list = No
 # 5. TRIM / NORMALIZE
 # ══════════════════════════════════════════════════════════════════════════
 
+def measure_source_brightness(src: Path, duration: float) -> float:
+    """
+    Cheap average-luma probe on the raw source clip, BEFORE any grading
+    is applied — used by compute_adaptive_exposure() to decide how much
+    a given clip's exposure needs correcting. Downsamples to a tiny
+    32x32 grayscale raster at ~1 sample/sec and averages the raw pixel
+    bytes directly (no ffprobe log-parsing needed), so it's cheap enough
+    to run once per clip ahead of the real trim/grade encode.
+
+    Returns a value in [0.0, 1.0] (0=black, 1=white). Falls back to a
+    neutral 0.5 (which compute_adaptive_exposure treats as "no
+    correction needed") if the probe fails for any reason — a
+    measurement hiccup should never break the render.
+    """
+    cmd = [
+        "ffmpeg", "-y", "-i", str(src),
+        "-t", str(max(duration, 1.0)),
+        "-vf", "fps=1,scale=32:32:flags=area,format=gray",
+        "-f", "rawvideo", "-pix_fmt", "gray",
+        "-",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=20)
+        data = result.stdout
+        if not data:
+            return 0.5
+        return sum(data) / (len(data) * 255.0)
+    except Exception as e:
+        log.warning("Brightness probe failed on %s (%s) — using neutral fallback.", src.name, e)
+        return 0.5
+
+
+def compute_adaptive_exposure(avg_luma: float) -> dict:
+    """
+    CORE VISUAL RULE: naturally bright source footage is never simply
+    rejected — it gets intelligently pulled down (lower exposure, tamed
+    highlights, slightly reduced saturation) until it fits the dark,
+    muted target aesthetic. Naturally dark footage is left alone beyond
+    a small, capped protective lift, so shadow detail never gets
+    crushed into an unreadable black. Mid-range footage is barely
+    touched at all.
+
+    Returns per-clip deltas that trim_and_normalize() layers ON TOP of
+    the template's base COLOR_GRADES entry — the template still decides
+    the reel's *style* (warm/cool/teal/etc.); this only decides how
+    much exposure correction this specific clip needs to reach it.
+    """
+    if avg_luma > TARGET_AVERAGE_LUMA:
+        over = avg_luma - TARGET_AVERAGE_LUMA
+        brightness_delta = -min(over * 0.85, MAX_BRIGHTNESS_PULLDOWN)
+        gamma_delta = -min(over * 0.55, MAX_HIGHLIGHT_GAMMA_PULLBACK)
+        saturation_delta = -min(over * 0.35, MAX_BRIGHT_SATURATION_PULLBACK)
+    elif avg_luma < DARK_SOURCE_LUMA_FLOOR:
+        under = DARK_SOURCE_LUMA_FLOOR - avg_luma
+        brightness_delta = min(under * 0.30, MAX_SHADOW_PROTECT_LIFT)
+        gamma_delta = 0.0
+        saturation_delta = 0.0
+    else:
+        brightness_delta = 0.0
+        gamma_delta = 0.0
+        saturation_delta = 0.0
+    return {
+        "brightness_delta": brightness_delta,
+        "gamma_delta": gamma_delta,
+        "saturation_delta": saturation_delta,
+    }
+
+
 def trim_and_normalize(src: Path, dst: Path, duration: float, grade: dict,
                         motion_style: str = "static", atmosphere_intensity: str = "low") -> None:
     """
     Trims `src` to `duration` seconds, applies a per-clip motion style
-    (item 8) and a color grade (item 9), and normalizes the result to a
-    single common format so that every clip fed into crossfade_concat is
-    guaranteed identical on every property xfade cares about:
+    (item 8), an adaptive exposure correction (see
+    compute_adaptive_exposure — the "bright footage gets pulled down
+    intelligently instead of rejected" rule), and the template's color
+    grade (item 9), and normalizes the result to a single common format
+    so that every clip fed into crossfade_concat is guaranteed identical
+    on every property xfade cares about:
 
       - VIDEO_WIDTH x VIDEO_HEIGHT (via the motion fragment's own
         scale+crop, or scale+crop directly for "static")
@@ -456,20 +530,46 @@ def trim_and_normalize(src: Path, dst: Path, duration: float, grade: dict,
 
     This is a real re-encode (not `-c copy`) specifically because only a
     re-encode can rewrite fps/SAR/pixel format/timebase; xfade is never
-    relied upon to reconcile any of these. Motion, color grade, and an
-    optional very light atmospheric grain overlay (item 6) are baked
-    into this SAME re-encode pass (rather than separate ffmpeg calls)
-    so a clip is only ever re-encoded once. `grade` is one of
-    visual_themes.COLOR_GRADES's value dicts.
+    relied upon to reconcile any of these. Motion, adaptive exposure,
+    color grade, and an optional very light atmospheric grain overlay
+    (item 6) are baked into this SAME re-encode pass (rather than
+    separate ffmpeg calls) so a clip is only ever re-encoded once.
+    `grade` is one of visual_themes.COLOR_GRADES's value dicts.
     """
     motion_fragment = motion_filter_fragment(motion_style, duration, VIDEO_FPS, VIDEO_WIDTH, VIDEO_HEIGHT)
     atmosphere_fragment = atmosphere_overlay_fragment(atmosphere_intensity)
+
+    # Adaptive exposure: measure this specific clip's own source
+    # brightness and layer a correction on top of the template's base
+    # grade, rather than trusting a fixed per-category offset to suit
+    # every clip regardless of how bright it actually is.
+    if ADAPTIVE_EXPOSURE_ENABLED:
+        avg_luma = measure_source_brightness(src, duration)
+        adaptive = compute_adaptive_exposure(avg_luma)
+    else:
+        avg_luma = None
+        adaptive = {"brightness_delta": 0.0, "gamma_delta": 0.0, "saturation_delta": 0.0}
+
+    # Clamp the combined (template grade + adaptive correction) result
+    # to sane bounds so an unusual combination of category grade and an
+    # extreme source clip can never fully flatten the image or invert
+    # into over-brightening.
+    final_brightness = max(min(grade["brightness"] + adaptive["brightness_delta"], 0.15), -0.45)
+    final_gamma = max(min(1.0 + adaptive["gamma_delta"], 1.15), 0.75)
+    final_saturation = max(min(grade["saturation"] + adaptive["saturation_delta"], 1.05), 0.55)
+
+    if avg_luma is not None:
+        log.info(
+            "Clip %s: source avg_luma=%.3f -> brightness=%.3f gamma=%.3f saturation=%.3f",
+            src.name, avg_luma, final_brightness, final_gamma, final_saturation,
+        )
 
     vf_parts = [
         motion_fragment,
         f"fps={VIDEO_FPS}",
         "setsar=1",
-        f"eq=contrast={grade['contrast']}:saturation={grade['saturation']}:brightness={grade['brightness']}",
+        f"eq=contrast={grade['contrast']}:saturation={final_saturation:.3f}:"
+        f"brightness={final_brightness:.3f}:gamma={final_gamma:.3f}",
         f"colorbalance=rs={grade['shadow_warmth']}:bs={-grade['shadow_warmth']}:"
         f"rh={grade['highlight_warmth']}:bh={-grade['highlight_warmth']}",
     ]
