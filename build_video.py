@@ -66,8 +66,8 @@ MAX_STAGE_RETRIES = 2
 # performance_metadata.pick_duration_bucket() (item 12: duration
 # experimentation) instead of a single fixed constant; these two
 # remain as the ultimate safety fallback if that selection ever fails.
-DEFAULT_TARGET_MAX_DURATION = 40.0
-DEFAULT_HARD_MAX_DURATION   = 45.0
+DEFAULT_TARGET_MAX_DURATION = 28.0
+DEFAULT_HARD_MAX_DURATION   = 31.0
 
 # ─── VISUAL POLISH ────────────────────────────────────────────────────────
 # Slow, duration-normalized Ken Burns zoom applied to the ENTIRE
@@ -151,6 +151,18 @@ def fit_batch_to_duration(batch: list, audio_files: list, audio_durations: list,
             "Ayah %s:%s alone is %.1fs, exceeding the %.0fs target — keeping it "
             "uncut since ayahs are never split.",
             batch[0][0], batch[0][1], cumulative, hard_max,
+        )
+    elif cumulative < target_max and kept == len(batch):
+        # Ran out of fetched/available ayahs (surah ended, or the fetch
+        # pool from audio_downloader.get_next_batch() was too small)
+        # before reaching the target floor. Not an error — some surahs
+        # are simply short — but worth flagging since it's the direct
+        # cause of a video landing under the intended duration window.
+        log.warning(
+            "Batch exhausted at %.1fs, short of the %.0fs target floor — "
+            "surah/fetch pool ended before reaching it. If this happens "
+            "often, increase AYAH_PER_VIDEO in audio_downloader.py.",
+            cumulative, target_max,
         )
 
     return batch[:kept], audio_files[:kept], audio_durations[:kept]
