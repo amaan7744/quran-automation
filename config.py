@@ -286,14 +286,22 @@ PERFORMANCE_SCORE_WEIGHTS = {
 }
 
 # ─── DURATION EXPERIMENTATION (item 12) ────────────────────────────────────────
-# Named duration buckets: (target_max, hard_max) seconds. Ayah integrity
-# always wins — build_video.fit_batch_to_duration() never splits an
-# ayah regardless of which bucket is chosen, so a bucket is a soft aim,
-# not a hard cut point.
+# Named duration buckets: (target_max, hard_max) seconds, applied to the
+# MAIN recitation segment (before the Bismillah intro is joined on).
+# Ayah integrity always wins — build_video.fit_batch_to_duration() never
+# splits an ayah regardless of which bucket is chosen, so a bucket is a
+# soft aim, not a hard cut point.
+#
+# All three buckets are kept inside a 25-35s FINAL-video target. Each
+# hard_max here leaves ~1-2s of headroom below 35s for the intro (see
+# INTRO_MIN_DURATION/INTRO_TARGET_MAX_DURATION below), which adds
+# roughly 0.7-1.3s net after its crossfade overlap with the main
+# segment. If INTRO_ENABLED is turned off, final duration == main
+# segment duration and the buffer is simply extra safety margin.
 DURATION_BUCKETS = {
-    "short_18_25":  (25.0, 28.0),
-    "medium_25_32": (32.0, 36.0),
-    "long_32_40":   (40.0, 45.0),
+    "short_25_28":  (25.0, 28.0),
+    "medium_28_31": (28.0, 31.0),
+    "long_31_33":   (31.0, 33.0),
 }
 
 # ─── ANALYTICS INGESTION (item 4) ──────────────────────────────────────────────
