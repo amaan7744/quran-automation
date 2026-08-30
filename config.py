@@ -113,6 +113,32 @@ CLIP_TRIM_MAX = 5.0
 # (light grades, not heavy LUTs); the beauty should still come from the
 # footage itself.
 
+# ─── ADAPTIVE EXPOSURE (per-clip brightness/highlight correction) ────────────
+# The named COLOR_GRADES above set the *style* of a reel (its base
+# contrast/saturation/warmth) but apply the same small fixed brightness
+# offset to every clip in a category regardless of how bright the
+# actual source footage is. A "midnight_blue" grade laid over a sunny
+# daytime beach clip still looks like a sunny daytime beach clip with a
+# blue tint. This section adds a second, per-clip pass: before grading,
+# trim_and_normalize() measures each clip's own average source
+# brightness and computes an additional exposure correction layered ON
+# TOP of the template's base grade — see pexels_fetcher.
+# measure_source_brightness() / compute_adaptive_exposure().
+#
+# CORE VISUAL RULE: naturally bright footage is never simply rejected —
+# it gets intelligently pulled down (lower exposure, tamed highlights,
+# slightly reduced saturation) until it fits the dark, muted target
+# look. Naturally dark footage is left mostly alone — only a small,
+# capped protective lift is applied so shadow detail is never crushed
+# into an unreadable black. Mid-range footage is barely touched.
+ADAPTIVE_EXPOSURE_ENABLED = os.environ.get("ADAPTIVE_EXPOSURE_ENABLED", "true").lower() not in ("0", "false", "no")
+TARGET_AVERAGE_LUMA = 0.36            # desired post-grade average brightness (0=black, 1=white)
+DARK_SOURCE_LUMA_FLOOR = 0.16         # below this, treat footage as "already dark" — protect, don't push darker
+MAX_BRIGHTNESS_PULLDOWN = 0.30        # hard cap on how far very bright source footage can be pulled down
+MAX_SHADOW_PROTECT_LIFT = 0.05        # hard cap on the gentle lift applied to already-dark footage
+MAX_HIGHLIGHT_GAMMA_PULLBACK = 0.22   # hard cap on the gamma reduction used to tame blown-out highlights
+MAX_BRIGHT_SATURATION_PULLBACK = 0.12 # hard cap on the extra saturation reduction for overly bright footage
+
 # ─── VIDEO EDITING (transitions) ─────────────────────────────────────────────
 TRANSITION_DURATION = 0.35    # seconds — premium subtle crossfade (~250-400ms target)
 
