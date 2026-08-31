@@ -70,9 +70,44 @@
         "facebook_video_id": "1082951170898520",
         "instagram_media_id": "18457825591189530"
       },
-      "uploaded_at_utc": "2026-08-29T18:32:52Z"
+      "uploaded_at_utc": "2026-08-29T18:32:52Z",
+      "metrics": {
+        "views": 1025,
+        "likes": 139,
+        "comments": 2,
+        "age_days": 1.7311017242592592,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "subscribers_gained": null
+      },
+      "performance_score": {
+        "score": 1.0,
+        "components": {
+          "retention": null,
+          "pace": null,
+          "subscriber": null,
+          "engagement": 1.0
+        },
+        "missing_metrics": [
+          "average_percentage_viewed",
+          "pace (views/age_days vs channel baseline)",
+          "subscribers_gained"
+        ]
+      }
     }
   },
-  "template_stats": {},
-  "duration_stats": {}
+  "template_stats": {
+    "reflection": {
+      "TEMPLATE_10_CINEMATIC_NATURE": {
+        "count": 1,
+        "avg_score": 1.0
+      }
+    }
+  },
+  "duration_stats": {
+    "short_18_25": {
+      "count": 1,
+      "avg_score": 1.0
+    }
+  }
 }
