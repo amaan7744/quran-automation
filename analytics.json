@@ -72,10 +72,10 @@
       },
       "uploaded_at_utc": "2026-08-29T18:32:52Z",
       "metrics": {
-        "views": 1025,
+        "views": 1024,
         "likes": 139,
         "comments": 2,
-        "age_days": 1.7311017242592592,
+        "age_days": 2.6742822605439813,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
@@ -332,14 +332,14 @@
   "template_stats": {
     "reflection": {
       "TEMPLATE_10_CINEMATIC_NATURE": {
-        "count": 1,
+        "count": 2,
         "avg_score": 1.0
       }
     }
   },
   "duration_stats": {
     "short_18_25": {
-      "count": 1,
+      "count": 2,
       "avg_score": 1.0
     }
   }
