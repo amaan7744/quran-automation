@@ -410,7 +410,13 @@
         "performance_score": null,
         "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
       },
-      "recorded_at_utc": "2026-09-01T17:24:56Z"
+      "recorded_at_utc": "2026-09-01T17:24:56Z",
+      "platform_ids": {
+        "youtube_video_id": "5wW7YTK0heM",
+        "facebook_video_id": "1601358978067627",
+        "instagram_media_id": "17901282360563685"
+      },
+      "uploaded_at_utc": "2026-09-01T17:26:59Z"
     }
   },
   "template_stats": {
