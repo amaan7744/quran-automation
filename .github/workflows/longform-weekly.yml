@@ -80,10 +80,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add longform_schedule_state.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update long-form schedule state [skip ci]"
-            git push
+          if [ -f longform_schedule_state.json ]; then
+            git add longform_schedule_state.json
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: update long-form schedule state [skip ci]"
+              git push
+            else
+              echo "No schedule state changes to commit."
+            fi
           else
-            echo "No schedule state changes to commit."
+            echo "longform_schedule_state.json does not exist yet (run_weekly_longform.py never reached a state-writing step) — nothing to commit."
           fi
