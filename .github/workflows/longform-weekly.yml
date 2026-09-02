@@ -62,13 +62,20 @@ jobs:
       # via config.py, resumes from longform_schedule_state.json via
       # surah_schedule.py, builds/validates/uploads privately, and
       # configures YouTube's scheduled publish for Friday 19:00 IST.
+      #
+      # PYTHONPATH includes the repo root because run_weekly_longform.py
+      # lives in longform/ while the shared modules it imports
+      # (config.py, surah_schedule.py, surah_builder.py, etc.) stay at the
+      # repo root — without this, `python longform/run_weekly_longform.py`
+      # only puts longform/ itself on sys.path and those imports fail.
       - name: Run weekly long-form pipeline
         env:
+          PYTHONPATH: ${{ github.workspace }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: python run_weekly_longform.py
+        run: python longform/run_weekly_longform.py
 
       # The state machine (pending -> uploaded -> completed) lives in
       # longform_schedule_state.json and MUST be durable across runners —
