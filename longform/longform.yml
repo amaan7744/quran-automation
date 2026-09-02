@@ -2,108 +2,198 @@
 # longform.yml
 # Configuration for the LONG-FORM (full-Surah) YouTube pipeline ONLY.
 #
-# This file is read ONLY by the long-form pipeline (config.py loads it and
-# uses it to override the LONGFORM_* constants; see the loader at the
-# bottom of config.py). It has no effect on Shorts/Reels — the short-form
-# pipeline (build_video.py / upload.py) never reads this file or anything
-# below the LONGFORM_* line in config.py.
+# This file is read only by the long-form configuration loader:
 #
-# Every key here has a safe fallback already defined in config.py, so
-# deleting a key (or this whole file) does not break the pipeline — it
-# just falls back to the Python default.
+#     longform/longform_config.py
+#
+# It is intentionally separate from the repository-root `config.py`,
+# which is shared infrastructure used by the Shorts/Reels pipeline.
+#
+# This file has NO direct effect on Shorts/Reels.
+#
+# Every setting has a safe Python fallback. If this file is missing or a
+# setting is omitted, the long-form pipeline falls back to its default.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Master switch for the whole long-form pipeline. When false, run_weekly_longform.py
-# logs and exits without building or uploading anything.
+
+# ───────────────────────────────────────────────────────────────────────────
+# MASTER SWITCH
+# ───────────────────────────────────────────────────────────────────────────
+
+# Disable the entire long-form pipeline without affecting Shorts/Reels.
 enabled: true
 
-# This is the TARGET YOUTUBE PUBLICATION SCHEDULE — not "when the workflow
-# runs". Long-form rendering can take hours, so the GitHub Actions workflow
-# now starts the build well BEFORE this time (see the cron comment in
-# .github/workflows/longform-weekly.yml), renders/validates/uploads the
-# video PRIVATE, and then configures YouTube's own scheduled-publish
-# mechanism (status.publishAt) to flip it public at exactly this day/time.
-# run_weekly_longform.py only validates that this block is well-formed
-# (valid weekday name / HH:MM / IANA timezone) — it no longer compares the
-# current time against it before deciding whether to run. Manual runs
-# (workflow_dispatch, or `--force`) skip even that validation.
+
+# ───────────────────────────────────────────────────────────────────────────
+# PUBLICATION SCHEDULE
+# ───────────────────────────────────────────────────────────────────────────
+
+# IMPORTANT:
+# This is the TARGET YOUTUBE PUBLICATION TIME.
+#
+# It is NOT the time at which GitHub Actions should start.
+#
+# The GitHub Actions workflow must start sufficiently early to:
+#
+#   build → render → validate → upload privately → schedule on YouTube
+#
+# YouTube then makes the video public automatically at this target time.
 schedule:
-  day: Friday            # Mon/Tue/Wed/Thu/Fri/Sat/Sun — publication day
-  time: "19:00"           # 24h HH:MM, local to `timezone` — publication time
+  day: Friday
+  time: "19:00"
   timezone: Asia/Kolkata
-  # Minimum lead time (in minutes) the run expects to have between the
-  # workflow starting and `time` above. If less than this remains when the
-  # run starts, it logs a warning (build proceeds regardless — this is a
-  # heads-up to move the cron earlier, not a hard gate).
+
+  # Minimum expected lead time before the target publication time.
+  #
+  # If the workflow starts with less than this amount of time remaining,
+  # the runner logs a warning but DOES NOT stop the build.
   grace_minutes: 90
 
-# Output video settings.
+
+# ───────────────────────────────────────────────────────────────────────────
+# VIDEO OUTPUT
+# ───────────────────────────────────────────────────────────────────────────
+
 video:
   width: 3840
   height: 2160
   fps: 30
-  crf: 18                 # libx264 quality (16-20 = high-quality 4K range)
+
+  # libx264 CRF.
+  # 18 = high-quality 4K output while keeping file size reasonable.
+  crf: 18
+
   audio_bitrate: "320k"
   audio_sample_rate: 48000
 
-# Background footage.
-background:
-  min_width: 2560          # 1440p floor; below this a clip is rejected outright
-  min_height: 1440
-  native_4k_width: 3840     # at/above this is logged as genuine native 4K
-  native_4k_height: 2160
-  clip_trim_min: 12.0       # seconds per clip — long-form scenes breathe, not "every few seconds"
-  clip_trim_max: 20.0
-  transition_duration: 1.5  # slow cinematic crossfade
-  avoid_duplicates: true    # enforced via the persistent Pexels clip-ID cache index
 
-# Subtitle styling.
+# ───────────────────────────────────────────────────────────────────────────
+# BACKGROUND FOOTAGE
+# ───────────────────────────────────────────────────────────────────────────
+
+background:
+
+  # Minimum accepted source resolution.
+  # Anything below 2560×1440 is rejected.
+  min_width: 2560
+  min_height: 1440
+
+  # Used to identify genuine/native 4K footage.
+  native_4k_width: 3840
+  native_4k_height: 2160
+
+  # Long-form scenes should breathe instead of changing every few seconds.
+  clip_trim_min: 12.0
+  clip_trim_max: 20.0
+
+  # Slow cinematic crossfade between scenes.
+  transition_duration: 1.5
+
+  # Prevent the same Pexels clip from being repeatedly selected.
+  # The persistent clip-ID cache is handled by the long-form pipeline.
+  avoid_duplicates: true
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUBTITLES
+# ───────────────────────────────────────────────────────────────────────────
+
 subtitles:
   arabic_font: "DigitalKhatt IndoPak"
   english_font: "Poppins"
   translation_source: "Saheeh International"
 
-# Intro / outro.
+
+# ───────────────────────────────────────────────────────────────────────────
+# INTRO / OUTRO
+# ───────────────────────────────────────────────────────────────────────────
+
 intro_outro:
   intro_enabled: true
   outro_enabled: true
+
   intro_duration: 6.0
   outro_duration: 8.0
+
   outro_message: "May Allah accept our worship"
 
-# Thumbnail.
+
+# ───────────────────────────────────────────────────────────────────────────
+# THUMBNAIL
+# ───────────────────────────────────────────────────────────────────────────
+
 thumbnail:
   enabled: true
 
-# YouTube publish settings.
+
+# ───────────────────────────────────────────────────────────────────────────
+# YOUTUBE
+# ───────────────────────────────────────────────────────────────────────────
+
 youtube:
-  # Status the video is UPLOADED with. Always "private" in the normal
-  # weekly flow — the video must never be public before the scheduled
-  # publication time above flips it.
-  upload_privacy: private          # private | unlisted | public
-  # Whether to configure YouTube's native scheduled-publish mechanism
-  # (status.publishAt) using the `schedule:` block above, so YouTube itself
-  # makes the video public at the target time with no runner kept alive.
-  # If false, the video is uploaded and left at `upload_privacy` with no
-  # scheduled publish configured (matches the old ad-hoc/manual behavior).
+
+  # The video is uploaded privately first.
+  #
+  # YouTube's scheduled publication mechanism then changes it to PUBLIC
+  # at the configured Friday 19:00 Asia/Kolkata publication time.
+  #
+  # Normal weekly flow should remain:
+  #
+  #     private → scheduled → public
+  upload_privacy: private
+
+  # Enable YouTube native scheduled publication.
   schedule_publish: true
-  category: "22"             # "People & Blogs"
+
+  # YouTube category:
+  # 22 = People & Blogs
+  category: "22"
+
+  # Optional playlist.
+  # Leave empty to skip automatic playlist assignment.
   playlist_id: ""
 
-# Pre-upload validation thresholds. These are intentionally NOT toggleable
-# down to "off" — the point of validation is that a failed check blocks
-# upload, full stop (see surah_validator.py). Listed here only so the
-# requirement is visible/auditable in one place, matching the spec.
+
+# ───────────────────────────────────────────────────────────────────────────
+# PRE-UPLOAD VALIDATION
+# ───────────────────────────────────────────────────────────────────────────
+
+# These are mandatory quality gates.
+#
+# A failed validation MUST block the YouTube upload.
+#
+# They are deliberately not configurable as "optional" requirements here.
 validation:
   require_4k: true
   require_audio: true
   require_subtitles: true
   require_thumbnail: true
 
-# Sequential Surah selection for the weekly automation (see surah_schedule.py).
-# Random selection is intentionally NOT supported — the whole Quran is
-# published in order, one Surah per Friday.
+
+# ───────────────────────────────────────────────────────────────────────────
+# SURAH SELECTION
+# ───────────────────────────────────────────────────────────────────────────
+
+# The weekly long-form pipeline publishes Surahs sequentially.
+#
+# Example:
+#
+#   Week 1  → Surah 1
+#   Week 2  → Surah 2
+#   Week 3  → Surah 3
+#   ...
+#   Week 114 → Surah 114
+#
+# Persistent progress is stored separately in:
+#
+#     longform_schedule_state.json
+#
+# Therefore `start` is only used when there is no existing schedule state.
 surah:
   selection: sequential
-  start: 1        # Surah number to begin from if no schedule state exists yet
-  wrap: true       # after Surah 114, loop back to 1 and keep publishing weekly
+
+  # Initial Surah when no persistent state exists.
+  start: 1
+
+  # After Surah 114, return to Surah 1 and continue weekly.
+  wrap: true
