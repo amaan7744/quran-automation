@@ -1,0 +1,89 @@
+name: Long-form weekly (Quran full-Surah)
+
+# ── STRUCTURE NOTE ──────────────────────────────────────────────────────────
+# This file is ONLY GitHub Actions CI wiring. All pipeline/application
+# configuration (schedule day/time/timezone, video settings, validation
+# thresholds, Surah sequencing, etc.) lives in longform/longform.yml and is
+# read by config.py — never here. Do not add pipeline settings to this file.
+#
+# TIMING: this workflow's `cron:` controls when the RENDER JOB STARTS, not
+# when the video goes public. YouTube's own scheduled-publish
+# (status.publishAt, configured by run_weekly_longform.py from
+# longform/longform.yml's `schedule:` block) is what makes the video public
+# at Friday 19:00 Asia/Kolkata. Rendering a 4K long-form video can take
+# hours, so this cron fires well before that target, on Thursday —
+# comfortably inside longform/longform.yml's `schedule.grace_minutes`
+# lead-time check, which just logs a warning (does not block) if a run
+# starts too close to the target.
+#
+# Thursday 10:00 UTC = Thursday 15:30 IST, i.e. ~28 hours before Friday
+# 19:00 IST (13:30 UTC Friday). Adjust the cron below if actual render
+# time on your runner needs a larger or smaller buffer — just keep it
+# safely earlier than Friday 13:30 UTC.
+on:
+  schedule:
+    - cron: "0 10 * * 4" # Thursday 10:00 UTC / 15:30 IST
+  workflow_dispatch: {} # manual runs still supported, unchanged
+
+# Only one long-form run at a time. `cancel-in-progress: false` queues a
+# second trigger (e.g. an accidental manual dispatch during the scheduled
+# run) instead of killing an in-flight multi-hour render — the pipeline's
+# own pending/uploaded/completed state machine handles resuming safely
+# either way, but there is no reason to throw away a run that's already
+# most of the way through.
+concurrency:
+  group: longform-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: write # required to commit the updated longform_schedule_state.json
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 480 # generous ceiling for a multi-hour 4K render; tune to your actual runtime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Existing long-form entrypoint — unchanged. Reads longform/longform.yml
+      # via config.py, resumes from longform_schedule_state.json via
+      # surah_schedule.py, builds/validates/uploads privately, and
+      # configures YouTube's scheduled publish for Friday 19:00 IST.
+      - name: Run weekly long-form pipeline
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python run_weekly_longform.py
+
+      # The state machine (pending -> uploaded -> completed) lives in
+      # longform_schedule_state.json and MUST be durable across runners —
+      # commit it regardless of whether the run above succeeded, so a
+      # crash mid-run still leaves the correct pending/uploaded record for
+      # next time (see surah_schedule.py).
+      - name: Commit updated schedule state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add longform_schedule_state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update long-form schedule state [skip ci]"
+            git push
+          else
+            echo "No schedule state changes to commit."
+          fi
