@@ -207,10 +207,24 @@ def main() -> int:
         video_path = build_surah(
             surah_num, upload=None, privacy=LONGFORM_UPLOAD_PRIVACY,
             publish_at=(publish_at_str if LONGFORM_SCHEDULE_PUBLISH else None),
+            # Persist Surah -> video_id into the crash-safe schedule state
+            # THE INSTANT YouTube confirms the upload — before build_surah
+            # even attempts the SCHEDULE stage. This is what closes the
+            # crash window: if the runner dies right after upload (with no
+            # exception ever reaching this except-block below), the
+            # schedule state is already 'uploaded' with the real video_id,
+            # so the next run's duplicate-safety shortcut above recovers
+            # it instead of re-rendering/re-uploading.
+            on_uploaded=lambda video_id: mark_uploaded(surah_num, video_id=video_id),
         )
     except ScheduleError as e:
+        # By this point on_uploaded has already persisted the 'uploaded'
+        # state above — this call is now a harmless, idempotent re-write
+        # (same surah, same video_id), kept as a safety net in case this
+        # exception path is ever reached without on_uploaded having run.
         log.error("Weekly run: upload succeeded but SCHEDULING failed for Surah %d (video ID %s): %s. "
-                   "Recording the upload so the next run retries scheduling only — NOT a re-upload.",
+                   "Schedule state already recorded as 'uploaded' so the next run retries scheduling "
+                   "only — NOT a re-upload.",
                    surah_num, e.video_id, e)
         mark_uploaded(surah_num, video_id=e.video_id)
         return 1
