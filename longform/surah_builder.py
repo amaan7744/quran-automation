@@ -21,6 +21,7 @@ state flag that could drift out of sync with what's really on disk.
 import json
 import time
 from pathlib import Path
+from typing import Callable, Optional
 
 from config import (
     LONGFORM_WORK_DIR, LONGFORM_OUTPUT_DIR, LONGFORM_ARABIC_FONT, LONGFORM_ENGLISH_FONT,
@@ -85,7 +86,8 @@ def _write_state(state_path: Path, stage: str, status: str, extra: dict = None) 
 
 def build_surah(surah_num: int, *, upload: bool = None, privacy: str = None,
                  force: bool = False, skip_background_download: bool = False,
-                 skip_thumbnail: bool = False, publish_at: str = None) -> Path:
+                 skip_thumbnail: bool = False, publish_at: str = None,
+                 on_uploaded: Optional[Callable[[str], None]] = None) -> Path:
     """
     Runs every stage for one Surah. Returns the path to the final video
     file. Raises BuildError on any unrecoverable failure (validation
@@ -93,6 +95,21 @@ def build_surah(surah_num: int, *, upload: bool = None, privacy: str = None,
     UPLOAD"). Raises the more specific ScheduleError (still a BuildError)
     if upload succeeded but the post-upload SCHEDULE stage did not — see
     that class's docstring.
+
+    `on_uploaded`, if given, is called with the YouTube video_id the
+    MOMENT the upload succeeds — before the SCHEDULE stage below is even
+    attempted. This is the crash-safety hook: the caller can bind it to
+    surah_schedule.mark_uploaded() so "Surah -> video_id" is durably
+    recorded in the git-committed weekly schedule state immediately,
+    closing the window where the runner dies (OOM, timeout, workflow
+    cancellation) between a successful upload and a successful SCHEDULE
+    stage. Without it, that crash would leave the persistent schedule
+    state at 'pending' with no record the video already exists, and the
+    next run would re-render and re-upload the same Surah. Left as an
+    injected callback (rather than importing surah_schedule directly here)
+    so ad-hoc/manual builds (build_surah.py, build_all_surahs.py) are not
+    forced into the weekly sequential schedule state machine — only
+    run_weekly_longform.py passes it.
 
     `publish_at`, if given, is an RFC3339 UTC timestamp (e.g.
     "2026-09-11T13:30:00Z"). When set AND LONGFORM_SCHEDULE_PUBLISH is
@@ -285,6 +302,17 @@ def build_surah(surah_num: int, *, upload: bool = None, privacy: str = None,
     except Exception as e:
         _write_state(state_path, "UPLOAD", "failed")
         raise BuildError(f"UPLOAD stage failed for Surah {surah_num}: {e}") from e
+
+    # ── DURABLE UPLOAD RECORD (crash-safe) ────────────────────────────────
+    # The upload has ALREADY succeeded at this point — deliberately kept
+    # OUTSIDE the try/except above so a failure here can never be
+    # mislabeled as "UPLOAD stage failed" (which would leave the
+    # persistent schedule state at 'pending' and risk a duplicate upload
+    # on retry, exactly backwards from the point of this hook). See
+    # `on_uploaded`'s docstring above for why this must happen now, before
+    # the SCHEDULE stage below, rather than after it succeeds or fails.
+    if on_uploaded is not None:
+        on_uploaded(video_id)
 
     # ── SCHEDULE ────────────────────────────────────────────────────────
     # Upload above always leaves the video at `privacy` (private, in the
