@@ -1,100 +1,227 @@
 name: Long-form weekly (Quran full-Surah)
 
-# ── STRUCTURE NOTE ──────────────────────────────────────────────────────────
-# This file is ONLY GitHub Actions CI wiring. All pipeline/application
-# configuration (schedule day/time/timezone, video settings, validation
-# thresholds, Surah sequencing, etc.) lives in longform/longform.yml and is
-# read by config.py — never here. Do not add pipeline settings to this file.
+# ============================================================================
+# LONG-FORM WEEKLY WORKFLOW
 #
-# TIMING: this workflow's `cron:` controls when the RENDER JOB STARTS, not
-# when the video goes public. YouTube's own scheduled-publish
-# (status.publishAt, configured by run_weekly_longform.py from
-# longform/longform.yml's `schedule:` block) is what makes the video public
-# at Friday 19:00 Asia/Kolkata. Rendering a 4K long-form video can take
-# hours, so this cron fires well before that target, on Thursday —
-# comfortably inside longform/longform.yml's `schedule.grace_minutes`
-# lead-time check, which just logs a warning (does not block) if a run
-# starts too close to the target.
+# This file contains GitHub Actions execution wiring ONLY.
 #
-# Thursday 10:00 UTC = Thursday 15:30 IST, i.e. ~28 hours before Friday
-# 19:00 IST (13:30 UTC Friday). Adjust the cron below if actual render
-# time on your runner needs a larger or smaller buffer — just keep it
-# safely earlier than Friday 13:30 UTC.
-on:
-  schedule:
-    - cron: "0 10 * * 4" # Thursday 10:00 UTC / 15:30 IST
-  workflow_dispatch: {} # manual runs still supported, unchanged
+# Application configuration lives at:
+#   longform/longform.yml
+#
+# Long-form configuration is loaded by:
+#   longform/longform_config.py
+#
+# The repository-root config.py remains the shared configuration used by
+# the existing Shorts/Reels pipeline.
+#
+# PUBLICATION TIMING
+#
+# This workflow's cron controls when the BUILD starts.
+# It does NOT control when the video becomes public.
+#
+# The weekly flow is:
+#
+#   Thursday workflow start
+#       ↓
+#   Render full-Surah video
+#       ↓
+#   Validate output
+#       ↓
+#   Upload to YouTube as PRIVATE
+#       ↓
+#   Set YouTube publishAt
+#       ↓
+#   Friday 19:00 Asia/Kolkata
+#       ↓
+#   YouTube automatically makes video PUBLIC
+#
+# The publication target is configured in:
+#   longform/longform.yml
+#
+#   schedule:
+#     day: Friday
+#     time: "19:00"
+#     timezone: Asia/Kolkata
+#
+# Thursday 10:00 UTC = Thursday 15:30 IST.
+# This provides approximately 27.5 hours before Friday 19:00 IST.
+# ============================================================================
 
-# Only one long-form run at a time. `cancel-in-progress: false` queues a
-# second trigger (e.g. an accidental manual dispatch during the scheduled
-# run) instead of killing an in-flight multi-hour render — the pipeline's
-# own pending/uploaded/completed state machine handles resuming safely
-# either way, but there is no reason to throw away a run that's already
-# most of the way through.
+
+on:
+  # Thursday 10:00 UTC / Thursday 15:30 Asia/Kolkata.
+  #
+  # This intentionally starts well before the Friday publication target
+  # because a 4K full-Surah render may take several hours.
+  schedule:
+    - cron: "0 10 * * 4"
+
+  # Allows manual execution from GitHub Actions.
+  workflow_dispatch: {}
+
+
+# ============================================================================
+# CONCURRENCY
+# ============================================================================
+#
+# Only one long-form workflow may execute at a time.
+#
+# Do not cancel an active multi-hour render if another scheduled/manual
+# invocation occurs. The second run waits instead.
+# ============================================================================
+
 concurrency:
   group: longform-weekly
   cancel-in-progress: false
 
+
+# ============================================================================
+# PERMISSIONS
+# ============================================================================
+#
+# Required because the workflow persists longform_schedule_state.json back
+# to the repository.
+# ============================================================================
+
 permissions:
-  contents: write # required to commit the updated longform_schedule_state.json
+  contents: write
+
+
+# ============================================================================
+# JOB
+# ============================================================================
 
 jobs:
   build-and-publish:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 480 # generous ceiling for a multi-hour 4K render; tune to your actual runtime
+
+    # Generous limit for 4K full-Surah rendering.
+    timeout-minutes: 480
+
     steps:
-      - name: Checkout
+
+      # ----------------------------------------------------------------------
+      # CHECKOUT
+      # ----------------------------------------------------------------------
+
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+
+      # ----------------------------------------------------------------------
+      # PYTHON
+      # ----------------------------------------------------------------------
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
+      # ----------------------------------------------------------------------
+      # DEPENDENCIES
+      # ----------------------------------------------------------------------
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Existing long-form entrypoint — unchanged. Reads longform/longform.yml
-      # via config.py, resumes from longform_schedule_state.json via
-      # surah_schedule.py, builds/validates/uploads privately, and
-      # configures YouTube's scheduled publish for Friday 19:00 IST.
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          else
+            echo "No requirements.txt found."
+          fi
+
+
+      # ----------------------------------------------------------------------
+      # LONG-FORM PIPELINE
+      # ----------------------------------------------------------------------
       #
-      # PYTHONPATH includes the repo root because run_weekly_longform.py
-      # lives in longform/ while the shared modules it imports
-      # (config.py, surah_schedule.py, surah_builder.py, etc.) stay at the
-      # repo root — without this, `python longform/run_weekly_longform.py`
-      # only puts longform/ itself on sys.path and those imports fail.
+      # IMPORTANT:
+      #
+      # The runner executes from repository root.
+      #
+      # Entry point:
+      #   longform/run_weekly_longform.py
+      #
+      # Long-form configuration:
+      #   longform/longform.yml
+      #
+      # Long-form Python configuration loader:
+      #   longform/longform_config.py
+      #
+      # Shared repository modules remain available from the repository root.
+      #
+      # PYTHONPATH explicitly includes the repository root so shared modules
+      # can be imported reliably.
+      # ----------------------------------------------------------------------
+
       - name: Run weekly long-form pipeline
         env:
           PYTHONPATH: ${{ github.workspace }}
+
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: python longform/run_weekly_longform.py
 
-      # The state machine (pending -> uploaded -> completed) lives in
-      # longform_schedule_state.json and MUST be durable across runners —
-      # commit it regardless of whether the run above succeeded, so a
-      # crash mid-run still leaves the correct pending/uploaded record for
-      # next time (see surah_schedule.py).
-      - name: Commit updated schedule state
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+
+        run: |
+          python longform/run_weekly_longform.py
+
+
+      # ----------------------------------------------------------------------
+      # PERSIST LONG-FORM SCHEDULE STATE
+      # ----------------------------------------------------------------------
+      #
+      # The persistent state machine is stored in:
+      #
+      #   longform_schedule_state.json
+      #
+      # The Python pipeline writes the state as it progresses:
+      #
+      #   pending
+      #      ↓
+      #   uploaded
+      #      ↓
+      #   completed
+      #
+      # IMPORTANT:
+      #
+      # The upload callback persists the YouTube video ID immediately after
+      # a successful upload. This protects against a runner dying between
+      # upload and scheduling.
+      #
+      # This GitHub step makes that state durable across future runners.
+      #
+      # `always()` means this step is attempted even if the Python pipeline
+      # fails.
+      #
+      # If the Python process dies before creating the state file, this step
+      # simply does nothing instead of producing a second failure.
+      # ----------------------------------------------------------------------
+
+      - name: Commit updated long-form schedule state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           if [ -f longform_schedule_state.json ]; then
+
             git add longform_schedule_state.json
-            if ! git diff --cached --quiet; then
+
+            if git diff --cached --quiet; then
+              echo "No long-form schedule state changes to commit."
+            else
               git commit -m "chore: update long-form schedule state [skip ci]"
               git push
-            else
-              echo "No schedule state changes to commit."
             fi
+
           else
-            echo "longform_schedule_state.json does not exist yet (run_weekly_longform.py never reached a state-writing step) — nothing to commit."
+            echo "longform_schedule_state.json does not exist."
+            echo "No schedule state changes to commit."
           fi
