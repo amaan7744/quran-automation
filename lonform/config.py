@@ -244,16 +244,21 @@ LONGFORM_SURAH_START = 1
 LONGFORM_SURAH_WRAP = True
 LONGFORM_SCHEDULE_STATE_FILE = ROOT_DIR / "longform_schedule_state.json"
 
-# ─── longform.yml LOADER ──────────────────────────────────────────────────────
-# Long-form-specific values live in longform.yml (spec: "do NOT scatter
-# long-form values throughout the Python code"). This loads it once, at
-# import time, and overrides ONLY the LONGFORM_* names above/in this
+# ─── longform/longform.yml LOADER ─────────────────────────────────────────────
+# Long-form-specific values live in longform/longform.yml (spec: "do NOT
+# scatter long-form values throughout the Python code"). This loads it once,
+# at import time, and overrides ONLY the LONGFORM_* names above/in this
 # section — nothing above the "LONGFORM (FULL-SURAH) PIPELINE" banner is
 # touched, so Shorts/Reels behavior can never change because of this file.
 # Missing file, missing keys, or a missing/broken PyYAML install all
 # degrade to "keep the Python fallback" rather than crashing either
 # pipeline.
-LONGFORM_YAML_FILE = ROOT_DIR / "longform.yml"
+# NOTE: this app-config YAML lives under longform/ — it is NOT the GitHub
+# Actions workflow (.github/workflows/longform-weekly.yml). Never point
+# this at anything under .github/workflows/: a workflow file is CI wiring,
+# this file is pipeline configuration, and GitHub will fail to parse the
+# workflows directory if the two are ever mixed up.
+LONGFORM_YAML_FILE = ROOT_DIR / "longform" / "longform.yml"
 
 
 def _load_longform_yaml() -> dict:
