@@ -75,22 +75,21 @@
         "views": 1023,
         "likes": 139,
         "comments": 2,
-        "age_days": 3.650286557893519,
+        "age_days": 4.65831133912037,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.0,
+        "score": 0.6025,
         "components": {
           "retention": null,
-          "pace": null,
+          "pace": 0.4435355801995382,
           "subscriber": null,
           "engagement": 1.0
         },
         "missing_metrics": [
           "average_percentage_viewed",
-          "pace (views/age_days vs channel baseline)",
           "subscribers_gained"
         ]
       }
@@ -197,19 +196,19 @@
       },
       "uploaded_at_utc": "2026-08-31T19:44:10Z",
       "metrics": {
-        "views": 504,
-        "likes": 88,
+        "views": 611,
+        "likes": 104,
         "comments": 2,
-        "age_days": 1.6010868224305557,
+        "age_days": 2.6091118334375,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.088,
+        "score": 0.6595,
         "components": {
           "retention": null,
-          "pace": 1.1232255628464833,
+          "pace": 0.523258958757615,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -350,19 +349,19 @@
       },
       "uploaded_at_utc": "2026-08-31T22:26:53Z",
       "metrics": {
-        "views": 1005,
-        "likes": 88,
+        "views": 1020,
+        "likes": 92,
         "comments": 2,
-        "age_days": 1.4878474106018518,
+        "age_days": 2.495872831759259,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.9074,
+        "score": 1.5723,
         "components": {
           "retention": null,
-          "pace": 2.2703502161043283,
+          "pace": 1.801174835685629,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -460,7 +459,29 @@
         "facebook_video_id": "1601358978067627",
         "instagram_media_id": "17901282360563685"
       },
-      "uploaded_at_utc": "2026-09-01T17:26:59Z"
+      "uploaded_at_utc": "2026-09-01T17:26:59Z",
+      "metrics": {
+        "views": 1071,
+        "likes": 177,
+        "comments": 0,
+        "age_days": 1.7041499914930553,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "subscribers_gained": null
+      },
+      "performance_score": {
+        "score": 1.8472,
+        "components": {
+          "retention": null,
+          "pace": 2.1860657296784147,
+          "subscriber": null,
+          "engagement": 1.0
+        },
+        "missing_metrics": [
+          "average_percentage_viewed",
+          "subscribers_gained"
+        ]
+      }
     },
     "39b623350603e189b123159bc1a21bd30b90d1e6949fa9ec616edf6225d7c45e": {
       "title": "Surah Al-Baqarah 2:198-198 | Quran",
@@ -544,7 +565,29 @@
         "facebook_video_id": "1093470349886235",
         "instagram_media_id": "17904384174480254"
       },
-      "uploaded_at_utc": "2026-09-01T20:27:56Z"
+      "uploaded_at_utc": "2026-09-01T20:27:56Z",
+      "metrics": {
+        "views": 1183,
+        "likes": 154,
+        "comments": 2,
+        "age_days": 1.5784571455324075,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "subscribers_gained": null
+      },
+      "performance_score": {
+        "score": 1.722,
+        "components": {
+          "retention": null,
+          "pace": 2.0107379999950674,
+          "subscriber": null,
+          "engagement": 1.0
+        },
+        "missing_metrics": [
+          "average_percentage_viewed",
+          "subscribers_gained"
+        ]
+      }
     },
     "4517d258c877e46da1fca9430b3a3470753e0c94dbdaebaeaa32f6bf9894477f": {
       "title": "Surah Al-Baqarah 2:199-200 | Quran",
@@ -724,31 +767,37 @@
   "template_stats": {
     "reflection": {
       "TEMPLATE_10_CINEMATIC_NATURE": {
-        "count": 3,
-        "avg_score": 1.0
+        "count": 4,
+        "avg_score": 0.900625
       },
       "TEMPLATE_01_COSMIC": {
-        "count": 1,
-        "avg_score": 1.088
+        "count": 3,
+        "avg_score": 1.1565
       },
       "TEMPLATE_08_CLOUDS": {
+        "count": 2,
+        "avg_score": 1.7398500000000001
+      }
+    },
+    "creation": {
+      "TEMPLATE_08_CLOUDS": {
         "count": 1,
-        "avg_score": 1.9074
+        "avg_score": 1.8472
       }
     }
   },
   "duration_stats": {
     "short_18_25": {
-      "count": 3,
-      "avg_score": 1.0
+      "count": 4,
+      "avg_score": 0.900625
     },
     "long_31_33": {
-      "count": 1,
-      "avg_score": 1.088
+      "count": 3,
+      "avg_score": 1.1982333333333333
     },
     "short_25_28": {
-      "count": 1,
-      "avg_score": 1.9074
+      "count": 3,
+      "avg_score": 1.7339000000000002
     }
   }
 }
