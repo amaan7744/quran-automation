@@ -94,7 +94,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from config import AUDIO_TARGET_LUFS, AUDIO_TRUE_PEAK, AUDIO_FADE_IN, AUDIO_FADE_OUT
+from longform_config import AUDIO_TARGET_LUFS, AUDIO_TRUE_PEAK, AUDIO_FADE_IN, AUDIO_FADE_OUT
 from logging_utils import get_logger
 
 log = get_logger(__name__)
