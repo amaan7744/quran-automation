@@ -12,7 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from config import LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS
+from longform_config import LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS
 from surah_timeline import SurahTimeline
 from logging_utils import get_logger
 
