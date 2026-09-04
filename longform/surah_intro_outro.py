@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 from subtitle_builder import escape_ass, sec_to_ass
-from config import (
+from longform_config import (
     LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS,
     LONGFORM_ARABIC_FONT, LONGFORM_ENGLISH_FONT,
     LONGFORM_INTRO_DURATION, LONGFORM_OUTRO_DURATION, LONGFORM_OUTRO_MESSAGE,
