@@ -46,7 +46,7 @@ from pathlib import Path
 
 from audio_downloader import download_one_ayah, get_duration
 from audio_processor import master_audio
-from config import LONGFORM_AUDIO_BITRATE, LONGFORM_AUDIO_SAMPLE_RATE
+from longform_config import LONGFORM_AUDIO_BITRATE, LONGFORM_AUDIO_SAMPLE_RATE
 from surah_validator import quick_media_check
 from logging_utils import get_logger
 
