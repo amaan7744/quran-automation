@@ -152,10 +152,28 @@ HASHTAG_POOL = [
 # LONGFORM_* value here can never change Shorts/Reels output.
 
 # ─── OUTPUT VIDEO ────────────────────────────────────────────────────────────
-LONGFORM_VIDEO_WIDTH  = 3840
-LONGFORM_VIDEO_HEIGHT = 2160
+# QUALITY PRESET: dropped from native 4K to 1080p by default. GitHub-hosted
+# runners are hard-capped at 6 hours of execution time (this cannot be
+# raised past 360 minutes even via a larger timeout-minutes value) and
+# guarantee only ~14GB of disk. A 4K/CRF18/"slow" render of a genuinely
+# multi-hour Surah cannot reliably finish inside either limit. 1080p is
+# the safe default; 1440p is available as a per-run bump (see "preset"
+# below and the workflow_dispatch input in longform-weekly.yml) for
+# shorter Surahs where there's headroom to spare.
+#   1080p ~4x fewer pixels than 4K -> ~4x less encode work
+#   1440p ~2.25x fewer pixels than 4K -> ~2.25x less encode work
+# LONGFORM_VIDEO_PRESET is the second, independent lever: libx264 preset
+# controls encode SPEED (not resolution) — "slow" (the old hardcoded
+# value in surah_renderer.py) is the main reason a multi-hour render
+# could blow the 6-hour cap even at 1080p. "veryfast" trades a modest
+# amount of compression efficiency (slightly larger file at the same
+# CRF) for a large, direct cut in wall-clock encode time — exactly what
+# a time-boxed CI runner needs.
+LONGFORM_VIDEO_WIDTH  = 1920
+LONGFORM_VIDEO_HEIGHT = 1080
 LONGFORM_VIDEO_FPS    = 30
-LONGFORM_VIDEO_CRF    = 18          # libx264 "high-quality 4K" range is 16-20
+LONGFORM_VIDEO_CRF    = 20          # slightly higher than the old 4K value of 18 — at 1080p this still looks clean, and a couple of CRF steps up meaningfully speeds encoding too
+LONGFORM_VIDEO_PRESET = "veryfast"  # was hardcoded "slow" in surah_renderer.py — see note above
 LONGFORM_AUDIO_BITRATE = "320k"
 LONGFORM_AUDIO_SAMPLE_RATE = 48000
 
@@ -180,15 +198,25 @@ LONGFORM_WORK_DIR.mkdir(parents=True, exist_ok=True)
 # filter as Shorts — only orientation/resolution/duration differ, so these
 # are threaded as parameters into the existing pexels_fetcher/quality_filter
 # functions rather than duplicated (see their `orientation=` params).
-MIN_LONGFORM_CLIP_WIDTH  = 2560   # 1440p floor per spec section 10 (4K preferred, 1440p acceptable)
-MIN_LONGFORM_CLIP_HEIGHT = 1440
-# Anything at/above this is logged as true native 4K source footage;
-# anything accepted between MIN_LONGFORM_CLIP_* and this is logged as an
-# upscale-on-render fallback so a 1440p-sourced background is never
-# silently presented as if it were native 4K (spec: "never silently
-# accept poor-quality footage").
-NATIVE_4K_CLIP_WIDTH  = 3840
-NATIVE_4K_CLIP_HEIGHT = 2160
+#
+# These floors now track LONGFORM_VIDEO_WIDTH/HEIGHT instead of being
+# hardcoded to a 4K-oriented 2560x1440 minimum. Requiring 1440p+ source
+# footage when rendering at 1080p wastes bandwidth, download time, and
+# disk on resolution the output doesn't use — a source clip at (or
+# modestly above) the actual render target is exactly what's needed.
+MIN_LONGFORM_CLIP_WIDTH  = LONGFORM_VIDEO_WIDTH
+MIN_LONGFORM_CLIP_HEIGHT = LONGFORM_VIDEO_HEIGHT
+# Anything at/above this is logged as true native-resolution source
+# footage (matching or exceeding the configured render target); anything
+# accepted between MIN_LONGFORM_CLIP_* and this is logged as an
+# upscale-on-render fallback so a downscaled/borderline source is never
+# silently presented as if it were native quality (spec: "never silently
+# accept poor-quality footage"). Renamed in spirit from the old
+# "NATIVE_4K_*" (still keyed as native_4k_width/height in longform.yml
+# for backward compatibility) to mean "native to whatever LONGFORM_VIDEO_*
+# is currently set to," not literally 4K.
+NATIVE_4K_CLIP_WIDTH  = LONGFORM_VIDEO_WIDTH
+NATIVE_4K_CLIP_HEIGHT = LONGFORM_VIDEO_HEIGHT
 # A long-form scene should breathe far longer than a Reel cut — 10-20s per
 # clip, never "every few seconds" (spec section 11/12).
 LONGFORM_CLIP_TRIM_MIN = 12.0
@@ -300,6 +328,7 @@ if _lf:
     LONGFORM_VIDEO_HEIGHT = int(_vid.get("height", LONGFORM_VIDEO_HEIGHT))
     LONGFORM_VIDEO_FPS = int(_vid.get("fps", LONGFORM_VIDEO_FPS))
     LONGFORM_VIDEO_CRF = int(_vid.get("crf", LONGFORM_VIDEO_CRF))
+    LONGFORM_VIDEO_PRESET = str(_vid.get("preset", LONGFORM_VIDEO_PRESET))
     LONGFORM_AUDIO_BITRATE = str(_vid.get("audio_bitrate", LONGFORM_AUDIO_BITRATE))
     LONGFORM_AUDIO_SAMPLE_RATE = int(_vid.get("audio_sample_rate", LONGFORM_AUDIO_SAMPLE_RATE))
 
@@ -368,3 +397,28 @@ if os.environ.get("LONGFORM_RECITER_NAME") is not None:
     LONGFORM_RECITER_NAME = os.environ["LONGFORM_RECITER_NAME"]
 if os.environ.get("LONGFORM_TRANSLATION_SOURCE") is not None:
     LONGFORM_TRANSLATION_SOURCE = os.environ["LONGFORM_TRANSLATION_SOURCE"]
+
+# ─── PER-RUN QUALITY OVERRIDE ──────────────────────────────────────────────
+# Lets a single workflow_dispatch run bump quality (e.g. 1080p -> 1440p for
+# a short Surah with time/disk to spare) without editing longform.yml.
+# See the "quality" input in .github/workflows/longform-weekly.yml, which
+# translates a simple dropdown choice into these env vars. Explicit
+# LONGFORM_VIDEO_* env vars always win over both longform.yml and the
+# Python defaults above, matching the "env vars win" pattern already used
+# for the upload/intro/outro settings above.
+if os.environ.get("LONGFORM_VIDEO_WIDTH") is not None:
+    LONGFORM_VIDEO_WIDTH = int(os.environ["LONGFORM_VIDEO_WIDTH"])
+if os.environ.get("LONGFORM_VIDEO_HEIGHT") is not None:
+    LONGFORM_VIDEO_HEIGHT = int(os.environ["LONGFORM_VIDEO_HEIGHT"])
+if os.environ.get("LONGFORM_VIDEO_CRF") is not None:
+    LONGFORM_VIDEO_CRF = int(os.environ["LONGFORM_VIDEO_CRF"])
+if os.environ.get("LONGFORM_VIDEO_PRESET") is not None:
+    LONGFORM_VIDEO_PRESET = os.environ["LONGFORM_VIDEO_PRESET"]
+# Background clip floors follow the env-overridden render target too, so a
+# manual quality bump doesn't leave the pipeline sourcing 1080p-floor clips
+# for a 1440p render (or vice versa).
+if os.environ.get("LONGFORM_VIDEO_WIDTH") is not None or os.environ.get("LONGFORM_VIDEO_HEIGHT") is not None:
+    MIN_LONGFORM_CLIP_WIDTH = LONGFORM_VIDEO_WIDTH
+    MIN_LONGFORM_CLIP_HEIGHT = LONGFORM_VIDEO_HEIGHT
+    NATIVE_4K_CLIP_WIDTH = LONGFORM_VIDEO_WIDTH
+    NATIVE_4K_CLIP_HEIGHT = LONGFORM_VIDEO_HEIGHT
