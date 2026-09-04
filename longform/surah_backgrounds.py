@@ -28,7 +28,7 @@ import subprocess
 from pathlib import Path
 
 from pexels_fetcher import collect_clips, trim_and_normalize, crossfade_concat, PexelsError
-from config import (
+from longform_config import (
     LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS,
     LONGFORM_TRANSITION_DURATION, LONGFORM_DURATION_BUFFER,
     LONGFORM_CLIP_TRIM_MIN, LONGFORM_CLIP_TRIM_MAX,
