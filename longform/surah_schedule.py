@@ -37,7 +37,7 @@ import json
 import time
 from pathlib import Path
 
-from config import LONGFORM_SCHEDULE_STATE_FILE, LONGFORM_SURAH_START, LONGFORM_SURAH_WRAP
+from longform_config import LONGFORM_SCHEDULE_STATE_FILE, LONGFORM_SURAH_START, LONGFORM_SURAH_WRAP
 from quran_metadata import all_surah_numbers
 from logging_utils import get_logger
 
