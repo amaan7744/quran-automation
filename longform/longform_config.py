@@ -16,7 +16,14 @@ VIDEO_FPS     = 60                 # falls back to 30 automatically if source cl
 TARGET_SIZE_MB = 95                # keep under Meta's 100MB Reels ceiling
 
 # ─── DIRECTORIES ─────────────────────────────────────────────────────────────
-ROOT_DIR       = Path(__file__).parent
+# NOTE: this file lives at longform/longform_config.py, one level below the
+# repo root — unlike the root config.py (where Path(__file__).parent IS the
+# repo root). .parent.parent here is what makes ROOT_DIR the actual repo
+# root, so QURAN_ARABIC_JSON/QURAN_ENGLISH_JSON below correctly resolve to
+# the real arabic.json/english.json at the repo root, and LONGFORM_YAML_FILE
+# further down correctly resolves to longform/longform.yml instead of a
+# nonexistent longform/longform/longform.yml.
+ROOT_DIR       = Path(__file__).resolve().parent.parent
 CACHE_DIR      = Path(os.environ.get("CLIP_CACHE_DIR", ROOT_DIR / ".cache" / "clips"))
 LOG_DIR        = Path(os.environ.get("LOG_DIR", ROOT_DIR / "logs"))
 UPLOAD_HISTORY_FILE = ROOT_DIR / "upload_history.json"
