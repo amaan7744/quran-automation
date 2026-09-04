@@ -25,7 +25,7 @@ from upload import (
     _youtube_wait_for_processing, _raise_for_platform_error, with_retries,
     file_hash, NonRetryableUploadError,
 )
-from config import LONGFORM_UPLOAD_CATEGORY, LONGFORM_UPLOAD_HISTORY_FILE
+from longform_config import LONGFORM_UPLOAD_CATEGORY, LONGFORM_UPLOAD_HISTORY_FILE
 from logging_utils import get_logger
 
 log = get_logger(__name__)
