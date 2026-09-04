@@ -127,7 +127,7 @@ def validate_final_video(video_path: Path, thumbnail_path: Path, metadata_path: 
     if (width, height) != (LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT):
         raise ValidationError(
             f"Resolution is {width}x{height}, expected {LONGFORM_VIDEO_WIDTH}x{LONGFORM_VIDEO_HEIGHT}. "
-            f"Refusing to upload a non-4K file."
+            f"Refusing to upload a file at the wrong resolution."
         )
 
     # 4. Aspect ratio.
