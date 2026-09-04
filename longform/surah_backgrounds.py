@@ -183,9 +183,11 @@ def build_landscape_background(total_duration: float, work_dir: Path, out_path: 
     bg_dir.mkdir(parents=True, exist_ok=True)
     segments_dir = bg_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = bg_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        clips = collect_clips(total_duration, bg_dir / "raw", **_collect_kwargs())
+        clips = collect_clips(total_duration, raw_dir, **_collect_kwargs())
     except PexelsError as e:
         raise PexelsError(f"Long-form background collection failed: {e}") from e
 
