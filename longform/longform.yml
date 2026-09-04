@@ -53,15 +53,38 @@ schedule:
 # ───────────────────────────────────────────────────────────────────────────
 # VIDEO OUTPUT
 # ───────────────────────────────────────────────────────────────────────────
-
+#
+# QUALITY PRESET NOTE:
+# Dropped from native 4K to 1080p as the default. GitHub-hosted Actions
+# runners are hard-capped at 6 hours of job execution time (this cannot
+# be raised even via a larger workflow `timeout-minutes`) and guarantee
+# only ~14GB of disk. A 4K/CRF18/"slow" render of a genuinely multi-hour
+# Surah could not reliably finish inside either limit.
+#
+# To bump a SPECIFIC run to 1440p (e.g. for a shorter Surah where there's
+# time/disk to spare), either:
+#   - edit width/height/crf here to 2560/1440/19, or
+#   - use the "quality" input on a manual workflow_dispatch run of
+#     longform-weekly.yml, which sets LONGFORM_VIDEO_WIDTH/HEIGHT/CRF/PRESET
+#     env vars that override this file for that run only (see
+#     longform_config.py's "PER-RUN QUALITY OVERRIDE" section).
 video:
-  width: 3840
-  height: 2160
+  width: 1920
+  height: 1080
   fps: 30
 
-  # libx264 CRF.
-  # 18 = high-quality 4K output while keeping file size reasonable.
-  crf: 18
+  # libx264 CRF. 20 is a couple of steps softer than the old 4K value of
+  # 18 — at 1080p this still looks clean, and it trims encode time too.
+  crf: 20
+
+  # libx264 preset. This is the single biggest lever for encode SPEED
+  # (independent of resolution/CRF, which control quality/size). The
+  # renderer previously hardcoded "slow", which is the main reason a
+  # multi-hour render could blow the 6-hour runner cap even at a lower
+  # resolution. "veryfast" trades a modest amount of compression
+  # efficiency (a slightly larger file at the same CRF) for a large,
+  # direct cut in wall-clock time.
+  preset: "veryfast"
 
   audio_bitrate: "320k"
   audio_sample_rate: 48000
@@ -73,14 +96,23 @@ video:
 
 background:
 
-  # Minimum accepted source resolution.
-  # Anything below 2560×1440 is rejected.
-  min_width: 2560
-  min_height: 1440
+  # Minimum accepted source resolution. Kept in sync with video.width/
+  # height above — sourcing 1440p+ footage for a 1080p render just burns
+  # extra download time and disk without the output ever using those
+  # extra pixels. If you bump video.width/height above to 1440p, bump
+  # these to match (2560 / 1440).
+  min_width: 1920
+  min_height: 1080
 
-  # Used to identify genuine/native 4K footage.
-  native_4k_width: 3840
-  native_4k_height: 2160
+  # Threshold for "this clip is native resolution" (matches or exceeds
+  # the configured render target above) vs "accepted but will be
+  # upscaled on render." Kept equal to video.width/height for the same
+  # reason as min_width/min_height above. (Key names kept as
+  # native_4k_width/height for backward compatibility with existing
+  # longform_config.py — they mean "native to the render target," not
+  # literally 4K, now that the default target is 1080p.)
+  native_4k_width: 1920
+  native_4k_height: 1080
 
   # Long-form scenes should breathe instead of changing every few seconds.
   clip_trim_min: 12.0
@@ -163,6 +195,11 @@ youtube:
 # A failed validation MUST block the YouTube upload.
 #
 # They are deliberately not configurable as "optional" requirements here.
+#
+# NOTE: require_4k is a naming holdover from when 4K was the only target.
+# The actual enforcement (in surah_validator.validate_final_video) checks
+# the rendered file's resolution against whatever video.width/height is
+# configured above — currently 1080p by default — not literally 4K.
 validation:
   require_4k: true
   require_audio: true
