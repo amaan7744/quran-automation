@@ -18,7 +18,7 @@ from pathlib import Path
 
 from longform_config import (
     LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS,
-    LONGFORM_VIDEO_CRF, LONGFORM_AUDIO_BITRATE, LONGFORM_AUDIO_SAMPLE_RATE,
+    LONGFORM_VIDEO_CRF, LONGFORM_VIDEO_PRESET, LONGFORM_AUDIO_BITRATE, LONGFORM_AUDIO_SAMPLE_RATE,
 )
 from surah_validator import quick_media_check
 from logging_utils import get_logger
@@ -38,7 +38,8 @@ def _probe_duration(path: Path) -> float:
 def render_main_body(background_video: Path, mastered_audio: Path, subtitles_ass: Path,
                       out_path: Path) -> None:
     """Single ffmpeg pass: mux background video + mastered audio, burn in
-    subtitles, encode once at the long-form 4K target."""
+    subtitles, encode once at the configured long-form resolution target
+    (LONGFORM_VIDEO_WIDTH/HEIGHT — 1080p by default, not necessarily 4K)."""
     vf = f"ass={subtitles_ass}"
     cmd = [
         "ffmpeg", "-y",
@@ -47,7 +48,7 @@ def render_main_body(background_video: Path, mastered_audio: Path, subtitles_ass
         "-vf", vf,
         "-map", "0:v:0", "-map", "1:a:0",
         "-r", str(LONGFORM_VIDEO_FPS),
-        "-c:v", "libx264", "-profile:v", "high", "-preset", "slow",
+        "-c:v", "libx264", "-profile:v", "high", "-preset", LONGFORM_VIDEO_PRESET,
         "-crf", str(LONGFORM_VIDEO_CRF), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", LONGFORM_AUDIO_BITRATE, "-ar", str(LONGFORM_AUDIO_SAMPLE_RATE),
         "-shortest",
@@ -136,7 +137,7 @@ def join_segments(segments: list, out_path: Path) -> None:
         "-filter_complex", filter_complex,
         "-map", "[outv]", "-map", "[outa]",
         "-r", str(LONGFORM_VIDEO_FPS),
-        "-c:v", "libx264", "-profile:v", "high", "-preset", "slow",
+        "-c:v", "libx264", "-profile:v", "high", "-preset", LONGFORM_VIDEO_PRESET,
         "-crf", str(LONGFORM_VIDEO_CRF), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", LONGFORM_AUDIO_BITRATE, "-ar", str(LONGFORM_AUDIO_SAMPLE_RATE),
         str(out_path),
