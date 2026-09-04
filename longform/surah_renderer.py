@@ -16,7 +16,7 @@ Composites the final long-form video:
 import subprocess
 from pathlib import Path
 
-from config import (
+from longform_config import (
     LONGFORM_VIDEO_WIDTH, LONGFORM_VIDEO_HEIGHT, LONGFORM_VIDEO_FPS,
     LONGFORM_VIDEO_CRF, LONGFORM_AUDIO_BITRATE, LONGFORM_AUDIO_SAMPLE_RATE,
 )
