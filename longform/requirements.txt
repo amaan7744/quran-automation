@@ -1,0 +1,11 @@
+requests>=2.31.0
+ultralytics
+# Required by longform/longform_config.py to load longform/longform.yml
+# (schedule, video, background, subtitles, upload settings for the
+# weekly full-Surah pipeline). Without this, longform_config.py silently
+# falls back to its hardcoded Python defaults and longform.yml is ignored.
+PyYAML>=6.0
+# Optional: only needed if BISMILLAH_TTS_ENABLED=true (intro_builder.py's
+# Arabic TTS fallback for the Bismillah opening — see config.py). Not
+# required for the default local-audio-file path (BISMILLAH_AUDIO_PATH).
+gtts>=2.5.0
