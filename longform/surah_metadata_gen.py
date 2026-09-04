@@ -6,7 +6,7 @@ from dynamic Surah metadata + the real rendered timeline — never
 hard-coded to one Surah (spec sections 17-19).
 """
 
-from config import LONGFORM_RECITER_NAME, LONGFORM_TRANSLATION_SOURCE, LONGFORM_CHAPTER_MAX_COUNT
+from longform_config import LONGFORM_RECITER_NAME, LONGFORM_TRANSLATION_SOURCE, LONGFORM_CHAPTER_MAX_COUNT
 from surah_timeline import SurahTimeline
 from logging_utils import get_logger
 
