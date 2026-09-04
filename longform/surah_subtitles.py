@@ -25,7 +25,7 @@ from pathlib import Path
 
 from subtitle_builder import escape_ass, sec_to_ass, get_ayah_text, wrap_to_two_lines
 from surah_timeline import SurahTimeline
-from config import LONGFORM_ARABIC_FONT, LONGFORM_ENGLISH_FONT
+from longform_config import LONGFORM_ARABIC_FONT, LONGFORM_ENGLISH_FONT
 from logging_utils import get_logger
 
 log = get_logger(__name__)
