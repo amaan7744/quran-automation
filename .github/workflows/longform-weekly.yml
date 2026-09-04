@@ -122,6 +122,47 @@ jobs:
 
 
       # ----------------------------------------------------------------------
+      # SYSTEM DEPENDENCIES (ffmpeg + fontconfig)
+      # ----------------------------------------------------------------------
+      #
+      # The long-form renderer shells out to ffmpeg/ffprobe just like the
+      # Shorts pipeline (see main.yml) — without this step every render
+      # stage fails immediately with "ffmpeg: command not found".
+      # ----------------------------------------------------------------------
+
+      - name: Install FFmpeg and System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fontconfig
+
+      # ----------------------------------------------------------------------
+      # FONTS
+      # ----------------------------------------------------------------------
+      #
+      # surah_subtitles.verify_fonts_available() refuses to render if
+      # LONGFORM_ARABIC_FONT / LONGFORM_ENGLISH_FONT aren't installed
+      # (see longform_config.py: these default to the same DigitalKhatt
+      # IndoPak / Poppins fonts main.yml installs for the Shorts pipeline).
+      # This runner starts with neither installed, so it must be done here
+      # too — mirroring main.yml's "Install Fonts" step exactly.
+      # ----------------------------------------------------------------------
+
+      - name: Install Fonts
+        run: |
+          mkdir -p ~/.fonts
+
+          curl -fsSL -o ~/.fonts/DigitalKhattIndoPak.otf \
+            https://github.com/DigitalKhatt/indopakfont/releases/download/v1.0.0-beta.1/indopak.otf
+
+          curl -fsSL -o ~/.fonts/Poppins-Regular.ttf \
+            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf
+
+          curl -fsSL -o ~/.fonts/Poppins-SemiBold.ttf \
+            https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf
+
+          fc-cache -fv
+
+      # ----------------------------------------------------------------------
       # DEPENDENCIES
       # ----------------------------------------------------------------------
 
