@@ -280,6 +280,12 @@ def acquire_clip(candidate: dict, tmpdir: Path, cache_dir: Path = None) -> Path:
         return cached
 
     raw = tmpdir / f"raw_{candidate['id']}.mp4"
+    # Unlike the Shorts pipeline (where `tmpdir` is always a real
+    # tempfile.TemporaryDirectory() that already exists on disk),
+    # surah_backgrounds.py passes in a plain, not-yet-created Path
+    # (`bg_dir / "raw"`) — so this download would fail with
+    # "No such file or directory" if the directory isn't created here.
+    raw.parent.mkdir(parents=True, exist_ok=True)
     download_clip(candidate["url"], raw)
     cached.parent.mkdir(parents=True, exist_ok=True)
     raw.replace(cached)
