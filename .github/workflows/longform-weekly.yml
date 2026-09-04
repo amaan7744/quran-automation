@@ -56,8 +56,18 @@ on:
   schedule:
     - cron: "0 10 * * 4"
 
-  # Allows manual execution from GitHub Actions.
-  workflow_dispatch: {}
+  # Allows manual execution from GitHub Actions, with an optional quality
+  # bump for this run only (defaults to longform.yml's 1080p baseline).
+  workflow_dispatch:
+    inputs:
+      quality:
+        description: "Render quality for this run"
+        type: choice
+        default: "1080p (default)"
+        options:
+          - "1080p (default)"
+          - "1440p"
+          - "4K (may exceed the 6h runner limit on longer Surahs)"
 
 
 # ============================================================================
@@ -199,6 +209,33 @@ jobs:
       # PYTHONPATH explicitly includes the repository root so shared modules
       # can be imported reliably.
       # ----------------------------------------------------------------------
+
+      - name: Resolve quality override
+        # Only set on a manual workflow_dispatch run where a non-default
+        # quality was chosen; scheduled runs leave these unset and fall
+        # through to longform.yml's 1080p baseline. Values written here
+        # land in $GITHUB_ENV, so they're already present in the
+        # environment for the "Run weekly long-form pipeline" step below
+        # — see longform_config.py's "PER-RUN QUALITY OVERRIDE" section,
+        # which gives explicit env vars priority over longform.yml.
+        run: |
+          case "${{ github.event.inputs.quality }}" in
+            "1440p")
+              echo "Quality override: 1440p"
+              echo "LONGFORM_VIDEO_WIDTH=2560" >> "$GITHUB_ENV"
+              echo "LONGFORM_VIDEO_HEIGHT=1440" >> "$GITHUB_ENV"
+              echo "LONGFORM_VIDEO_CRF=19" >> "$GITHUB_ENV"
+              ;;
+            "4K (may exceed the 6h runner limit on longer Surahs)")
+              echo "Quality override: 4K"
+              echo "LONGFORM_VIDEO_WIDTH=3840" >> "$GITHUB_ENV"
+              echo "LONGFORM_VIDEO_HEIGHT=2160" >> "$GITHUB_ENV"
+              echo "LONGFORM_VIDEO_CRF=18" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "No quality override — using longform.yml's 1080p default."
+              ;;
+          esac
 
       - name: Run weekly long-form pipeline
         env:
