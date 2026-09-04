@@ -86,7 +86,7 @@ from pathlib import Path
 
 import requests
 
-from config import (
+from longform_config import (
     PEXELS_API_KEY, PEXELS_SEARCH_URL, THEMED_QUERIES, CLIPS_PER_QUERY,
     QUERIES_PER_RUN, DURATION_BUFFER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
     CLIP_TRIM_MIN, CLIP_TRIM_MAX, VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS,
