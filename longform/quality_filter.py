@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Tuple
 
-from config import (
+from longform_config import (
     CACHE_DIR,
     CACHE_INDEX_FILE,
     MIN_CLIP_DURATION,
@@ -154,4 +154,3 @@ def validate_clip(
         return False, f"Duration {duration:.2f}s below minimum {min_duration}s"
 
     return True, ""
-
