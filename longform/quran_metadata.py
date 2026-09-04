@@ -16,7 +16,7 @@ from pathlib import Path
 import requests
 
 from surah_data import SURAHS
-from config import LONGFORM_META_CACHE_FILE
+from longform_config import LONGFORM_META_CACHE_FILE
 from logging_utils import get_logger
 
 log = get_logger(__name__)
