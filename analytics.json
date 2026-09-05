@@ -890,6 +890,84 @@
         "instagram_media_id": "18059219558685645"
       },
       "uploaded_at_utc": "2026-09-04T17:00:47Z"
+    },
+    "c9b1e9617b38f5e5b5b6028a86e38e8e876f07ad97fdaca9d7e6f1de227a5c42": {
+      "title": "Surah Al-Baqarah 2:204-205 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 204,
+      "last_ayah": 205,
+      "duration": 21.410313,
+      "duration_bucket": "short_25_28",
+      "video_file": "output_video.mp4",
+      "video_hash": "c9b1e9617b38f5e5b5b6028a86e38e8e876f07ad97fdaca9d7e6f1de227a5c42",
+      "visual_template": "TEMPLATE_08_CLOUDS",
+      "visual_mood": "reflection",
+      "visual_category": "clouds_heaven",
+      "motion_styles": [
+        "push_in",
+        "push_in",
+        "push_in",
+        "drift_horizontal",
+        "push_in",
+        "drift_horizontal"
+      ],
+      "transition_style": "fade",
+      "color_grade": "dawn",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3744,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "6/6",
+      "upload_time_utc": "2026-09-05T16:01:59Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-05T16:01:59Z"
     }
   },
   "template_stats": {
