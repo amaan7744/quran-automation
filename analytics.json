@@ -1170,6 +1170,72 @@
         "instagram_media_id": "18111313226276631"
       },
       "uploaded_at_utc": "2026-09-06T16:16:50Z"
+    },
+    "54ff569b1754c888edda80c3e1b174006656059064c07eaa0543ce6038355b2b": {
+      "title": "Surah Al-Baqarah 2:210-210 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 210,
+      "last_ayah": 210,
+      "duration": 12.808,
+      "duration_bucket": "short_25_28",
+      "video_file": "output_video.mp4",
+      "video_hash": "54ff569b1754c888edda80c3e1b174006656059064c07eaa0543ce6038355b2b",
+      "visual_template": "TEMPLATE_08_CLOUDS",
+      "visual_mood": "reflection",
+      "visual_category": "clouds_heaven",
+      "motion_styles": [
+        "drift_horizontal",
+        "drift_horizontal",
+        "pull_out",
+        "pull_out"
+      ],
+      "transition_style": "dissolve",
+      "color_grade": "dawn",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "4/4",
+      "upload_time_utc": "2026-09-06T19:50:36Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-06T19:50:36Z"
     }
   },
   "template_stats": {
