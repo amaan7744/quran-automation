@@ -1286,6 +1286,84 @@
         "instagram_media_id": "18025440248857435"
       },
       "uploaded_at_utc": "2026-09-06T19:52:31Z"
+    },
+    "287b3f874537301027bfc70197998e356bea44f2c74b66c912ad70507d13fa97": {
+      "title": "Surah Al-Baqarah 2:211-211 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 211,
+      "last_ayah": 211,
+      "duration": 15.42025,
+      "duration_bucket": "short_25_28",
+      "video_file": "output_video.mp4",
+      "video_hash": "287b3f874537301027bfc70197998e356bea44f2c74b66c912ad70507d13fa97",
+      "visual_template": "TEMPLATE_10_CINEMATIC_NATURE",
+      "visual_mood": "gratitude",
+      "visual_category": "mountain",
+      "motion_styles": [
+        "drift_horizontal",
+        "drift_horizontal",
+        "drift_horizontal",
+        "drift_horizontal",
+        "static",
+        "static"
+      ],
+      "transition_style": "fade",
+      "color_grade": "neutral_cinematic",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "6/6",
+      "upload_time_utc": "2026-09-07T18:19:45Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-07T18:19:45Z"
     }
   },
   "template_stats": {
