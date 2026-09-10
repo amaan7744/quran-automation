@@ -1954,6 +1954,144 @@
         "instagram_media_id": "17937966588412049"
       },
       "uploaded_at_utc": "2026-09-10T17:11:59Z"
+    },
+    "e73ac76ddaf094b7ff007c5b160821cc9eda62877d720fcf270c5ecc1c0ecd0d": {
+      "title": "Surah Al-Baqarah 2:217-217 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 217,
+      "last_ayah": 217,
+      "duration": 50.659438,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "e73ac76ddaf094b7ff007c5b160821cc9eda62877d720fcf270c5ecc1c0ecd0d",
+      "visual_template": "TEMPLATE_07_DEEP_WATER",
+      "visual_mood": "warning",
+      "visual_category": "rain_water",
+      "motion_styles": [
+        "static",
+        "static",
+        "drift_vertical",
+        "static",
+        "drift_vertical",
+        "static",
+        "drift_vertical",
+        "drift_vertical",
+        "drift_vertical",
+        "static",
+        "drift_vertical",
+        "static",
+        "static",
+        "static",
+        "drift_vertical",
+        "static"
+      ],
+      "transition_style": "fade",
+      "color_grade": "midnight_blue",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "16/16",
+      "upload_time_utc": "2026-09-10T20:38:11Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-10T20:38:11Z"
     }
   },
   "template_stats": {
