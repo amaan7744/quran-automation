@@ -2488,6 +2488,114 @@
         "instagram_media_id": "18113679700804912"
       },
       "uploaded_at_utc": "2026-09-12T16:20:30Z"
+    },
+    "6e80fcc70ea0d1e35b4f9a0065111ccc98fc36643d998a3e556357058680d672": {
+      "title": "Surah Al-Baqarah 2:221-221 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 221,
+      "last_ayah": 221,
+      "duration": 36.396563,
+      "duration_bucket": "short_25_28",
+      "video_file": "output_video.mp4",
+      "video_hash": "6e80fcc70ea0d1e35b4f9a0065111ccc98fc36643d998a3e556357058680d672",
+      "visual_template": "TEMPLATE_08_CLOUDS",
+      "visual_mood": "reflection",
+      "visual_category": "clouds_heaven",
+      "motion_styles": [
+        "push_in",
+        "drift_horizontal",
+        "push_in",
+        "drift_horizontal",
+        "pull_out",
+        "drift_horizontal",
+        "drift_horizontal",
+        "pull_out",
+        "pull_out",
+        "pull_out",
+        "push_in"
+      ],
+      "transition_style": "fade",
+      "color_grade": "dawn",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 1440,
+          "source_height": 2562,
+          "source_quality_tier": "1440p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2158,
+          "source_height": 3840,
+          "source_quality_tier": "1440p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "11/11",
+      "upload_time_utc": "2026-09-13T17:10:03Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-13T17:10:03Z"
     }
   },
   "template_stats": {
