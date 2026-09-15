@@ -2934,6 +2934,60 @@
         "instagram_media_id": "18119939680931032"
       },
       "uploaded_at_utc": "2026-09-15T17:51:31Z"
+    },
+    "245a080ad9025a9ccda4ce1e55c89976b99032e6bc2018f8629d77c2763f1f7a": {
+      "title": "Surah Al-Baqarah 2:227-227 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 227,
+      "last_ayah": 227,
+      "duration": 5.624313,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "245a080ad9025a9ccda4ce1e55c89976b99032e6bc2018f8629d77c2763f1f7a",
+      "visual_template": "TEMPLATE_08_CLOUDS",
+      "visual_mood": "reflection",
+      "visual_category": "clouds_heaven",
+      "motion_styles": [
+        "push_in",
+        "push_in"
+      ],
+      "transition_style": "fade",
+      "color_grade": "dawn",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "2/2",
+      "upload_time_utc": "2026-09-15T20:40:12Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-15T20:40:12Z"
     }
   },
   "template_stats": {
