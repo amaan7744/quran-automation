@@ -17,7 +17,7 @@ on:
   schedule:
     # Six-hour cadence. The 330-minute chunk intentionally leaves a gap
     # between jobs rather than risking the GitHub job time limit.
-    - cron: "0 0,6,12,18 * * *"
+    - cr*"
 
 concurrency:
   group: quran-live-chunk
