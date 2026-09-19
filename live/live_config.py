@@ -15,7 +15,7 @@ LOG_DIR = Path(os.environ.get("LIVE_LOG_DIR", ROOT_DIR / "logs" / "live"))
 ARABIC_DATA_FILE = Path(os.environ.get("LIVE_ARABIC_DATA", ROOT_DIR / "arabic.json"))
 ENGLISH_DATA_FILE = Path(os.environ.get("LIVE_ENGLISH_DATA", ROOT_DIR / "english.json"))
 FONT_DIR = ROOT_DIR / "fonts"
-ARABIC_FONT_FILE = Path(os.environ.get("LIVE_ARABIC_FONT", FONT_DIR / "DigitalKhattIndoPak.otf"))
+ARABIC_FONT_FILE = Path(os.environ.get("LIVE_ARABIC_FONT", FONT_DIR / "NotoNaskhArabic-Regular.ttf"))
 ENGLISH_FONT_FILE = Path(os.environ.get("LIVE_ENGLISH_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
 SUBTITLE_DIR = Path(os.environ.get("LIVE_SUBTITLE_DIR", LIVE_DIR / "subtitles"))
 
