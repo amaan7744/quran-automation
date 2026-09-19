@@ -8,7 +8,20 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 LIVE_DIR = ROOT_DIR / "live"
 CACHE_DIR = Path(os.environ.get("LIVE_CACHE_DIR", ROOT_DIR / ".cache" / "live_audio"))
 STATE_FILE = Path(os.environ.get("LIVE_STATE_FILE", LIVE_DIR / "stream_state.json"))
-BACKGROUND_FILE = Path(os.environ.get("LIVE_BACKGROUND", LIVE_DIR /  "background.mp4"))
+BACKGROUND_FILE = Path(os.environ.get("LIVE_BACKGROUND", LIVE_DIR / "background.mp4"))
+# Live subtitle data/font files.
+ARABIC_DATA_FILE = Path(os.environ.get("LIVE_ARABIC_DATA", ROOT_DIR / "arabic.json"))
+ENGLISH_DATA_FILE = Path(os.environ.get("LIVE_ENGLISH_DATA", ROOT_DIR / "english.json"))
+FONT_DIR = Path(os.environ.get("LIVE_FONT_DIR", ROOT_DIR / "fonts"))
+ARABIC_FONT_FILE = Path(os.environ.get(
+    "LIVE_ARABIC_FONT",
+    FONT_DIR / "NotoNaskhArabic-Regular.ttf",
+))
+ENGLISH_FONT_FILE = Path(os.environ.get(
+    "LIVE_ENGLISH_FONT",
+    FONT_DIR / "DejaVuSans.ttf",
+))
+SUBTITLE_DIR = Path(os.environ.get("LIVE_SUBTITLE_DIR", LIVE_DIR / "subtitles"))
 LOG_DIR = Path(os.environ.get("LIVE_LOG_DIR", ROOT_DIR / "logs" / "live"))
 
 # YouTube Live ingest. Keep the stream key in an environment variable/secret.
