@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 from pathlib import Path
 
 from live.live_config import (
@@ -39,10 +40,20 @@ def _ayah(data: dict, surah: int, ayah: int) -> str:
     return ""
 
 
+def _clean_text(text: str) -> str:
+    """Normalize Quran/translation text without changing its wording."""
+    # NFC keeps Arabic combining marks in a canonical Unicode representation.
+    # Do not reverse, reshape, or manually reorder Arabic: FFmpeg/libfribidi
+    # handles RTL shaping when text_shaping=1 is enabled.
+    text = unicodedata.normalize("NFC", text)
+    text = text.replace("\ufeff", "").replace("\r", "")
+    return text.strip()
+
+
 def _atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    tmp.write_text(_clean_text(text) + "\n", encoding="utf-8", newline="\n")
     os.replace(tmp, path)
 
 
@@ -73,8 +84,8 @@ def _wrap_words(text: str, max_chars: int) -> str:
 
 def prepare_subtitles(surah: int, ayah: int, surah_name: str, total_ayahs: int) -> None:
     """Write the current Arabic + English subtitle pair atomically."""
-    arabic = _ayah(_AR, surah, ayah)
-    english = _ayah(_EN, surah, ayah)
+    arabic = _clean_text(_ayah(_AR, surah, ayah))
+    english = _clean_text(_ayah(_EN, surah, ayah))
     if not arabic:
         arabic = ""
     if not english:
