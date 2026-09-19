@@ -249,8 +249,9 @@ def _ffmpeg_filter() -> str:
         f"fontcolor=white:fontsize=34:borderw=2:bordercolor=black@0.75:"
         f"x=(w-text_w)/2:y=70,"
         f"drawtext=fontfile='{ar_font}':textfile='{ar_txt}':reload=1:"
-        f"fontcolor=white:fontsize=48:borderw=3:bordercolor=black@0.80:"
-        f"text_shaping=1:x=(w-text_w)/2:y=h-300,"
+        f"fontcolor=white:fontsize=50:borderw=3:bordercolor=black@0.85:"
+        f"text_shaping=1:fix_bounds=1:line_spacing=10:"
+        f"x=(w-text_w)/2:y=h-320,"
         f"drawtext=fontfile='{en_font}':textfile='{en_txt}':reload=1:"
         f"fontcolor=white:fontsize=28:borderw=2:bordercolor=black@0.80:"
         f"x=(w-text_w)/2:y=h-150"
@@ -294,6 +295,8 @@ def start_encoder() -> subprocess.Popen:
         rtmp_target,
     ]
 
+    log.info("Arabic subtitle font: %s", ARABIC_FONT_FILE)
+    log.info("English subtitle font: %s", ENGLISH_FONT_FILE)
     log.info("Starting FFmpeg encoder: %dx%d @ %dfps, %s video / %s audio", WIDTH, HEIGHT, FPS, VIDEO_BITRATE, AUDIO_BITRATE)
     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=None, bufsize=0)
 
