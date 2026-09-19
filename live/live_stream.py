@@ -68,6 +68,7 @@ from live.live_config import (
 LOG_DIR = ROOT_DIR / "logs" / "live"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+LIVE_DIR = ROOT_DIR / "live"
 ARABIC_DATA_FILE = ROOT_DIR / "arabic.json"
 ENGLISH_DATA_FILE = ROOT_DIR / "english.json"
 SUBTITLE_DIR = LIVE_DIR / "subtitle_cache"
