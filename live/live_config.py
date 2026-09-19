@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 LIVE_DIR = ROOT_DIR / "live"
 CACHE_DIR = Path(os.environ.get("LIVE_CACHE_DIR", ROOT_DIR / ".cache" / "live_audio"))
 STATE_FILE = Path(os.environ.get("LIVE_STATE_FILE", LIVE_DIR / "stream_state.json"))
-BACKGROUND_FILE = Path(os.environ.get("LIVE_BACKGROUND", LIVE_DIR / "live_background.png"))
+BACKGROUND_FILE = Path(os.environ.get("LIVE_BACKGROUND", LIVE_DIR /  "background.mp4"))
 LOG_DIR = Path(os.environ.get("LIVE_LOG_DIR", ROOT_DIR / "logs" / "live"))
 
 # YouTube Live ingest. Keep the stream key in an environment variable/secret.
