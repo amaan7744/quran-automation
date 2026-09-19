@@ -1,0 +1,19 @@
+[Unit]
+Description=24/7 Quran Recitation YouTube Live
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quran
+WorkingDirectory=/opt/quran-automation
+EnvironmentFile=/etc/quran-live/quran-live.env
+ExecStart=/opt/quran-automation/.venv/bin/python /opt/quran-automation/live/live_stream.py
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
