@@ -1,0 +1,94 @@
+name: Quran Live - GitHub Actions Chunk
+
+# EXPERIMENTAL / FREE MODE
+# GitHub-hosted runners are temporary and have a maximum job duration.
+# This workflow therefore runs a bounded stream chunk and persists the next
+# Quran ayah in live/stream_state.json. It is NOT a guaranteed uninterrupted
+# 24/7 stream; gaps can occur between runner jobs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to stream (max 350 minutes)"
+        required: false
+        default: "330"
+        type: string
+  schedule:
+    # Six-hour cadence. The 330-minute chunk intentionally leaves a gap
+    # between jobs rather than risking the GitHub job time limit.
+    - cron: "0 0,6,12,18 * * *"
+
+concurrency:
+  group: quran-live-chunk
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Quran live chunk
+        env:
+          YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          YOUTUBE_RTMP_URL: rtmps://a.rtmps.youtube.com/live2
+          LIVE_RUN_MINUTES: ${{ inputs.minutes || '330' }}
+          LIVE_VIDEO_BITRATE: 2500k
+          LIVE_VIDEO_MAXRATE: 2500k
+          LIVE_VIDEO_BUFSIZE: 5000k
+          LIVE_AUDIO_BITRATE: 128k
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ -z "$YOUTUBE_STREAM_KEY" ]; then
+            echo "YOUTUBE_STREAM_KEY secret is missing."
+            exit 1
+          fi
+          python live/live_stream.py
+
+      - name: Persist livestream position
+        if: always()
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "github-actions[bot]"
+
+          if [ -f live/stream_state.json ]; then
+            git add live/stream_state.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo "No live state changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: update Quran live position [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Upload live log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quran-live-log
+          path: logs/live/**
+          if-no-files-found: ignore
+          retention-days: 3
