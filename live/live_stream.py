@@ -38,11 +38,6 @@ import requests
 from surah_data import SURAHS
 from live.live_config import (
     AUDIO_BITRATE,
-    ARABIC_DATA_FILE,
-    ARABIC_FONT_FILE,
-    ENGLISH_DATA_FILE,
-    ENGLISH_FONT_FILE,
-    SUBTITLE_DIR,
     BACKGROUND_FILE,
     CACHE_DIR,
     CHANNELS,
@@ -70,10 +65,20 @@ from live.live_config import (
     WIDTH,
 )
 
-from live.live_subtitles import prepare_subtitles, subtitle_files
-
 LOG_DIR = ROOT_DIR / "logs" / "live"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+ARABIC_DATA_FILE = ROOT_DIR / "arabic.json"
+ENGLISH_DATA_FILE = ROOT_DIR / "english.json"
+SUBTITLE_DIR = LIVE_DIR / "subtitle_cache"
+ARABIC_SUBTITLE = SUBTITLE_DIR / "arabic.txt"
+ENGLISH_SUBTITLE = SUBTITLE_DIR / "english.txt"
+META_SUBTITLE = SUBTITLE_DIR / "meta.txt"
+
+# GitHub's Ubuntu runner has DejaVu Sans installed. It supports Arabic glyphs,
+# and FFmpeg's drawtext text_shaping uses FriBidi when available. No font file
+# is committed to the repository.
+SYSTEM_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | live | %(message)s",
@@ -100,6 +105,72 @@ signal.signal(signal.SIGTERM, handle_signal)
 SURAH_MAP = {row[0]: row for row in SURAHS}
 
 
+def _load_translation_file(path: Path) -> dict:
+    if not path.exists():
+        raise RuntimeError(f"Missing Quran text resource: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+ARABIC_DATA = _load_translation_file(ARABIC_DATA_FILE)
+ENGLISH_DATA = _load_translation_file(ENGLISH_DATA_FILE)
+
+
+def _ayah_text(data: dict, surah: int, ayah: int) -> str:
+    for row in data.get("surahs", []):
+        if int(row.get("number", -1)) == surah:
+            for item in row.get("ayahs", []):
+                if int(item.get("number", -1)) == ayah:
+                    return str(item.get("text", "")).strip()
+    return ""
+
+
+def _wrap_text(text: str, max_chars: int) -> str:
+    words = text.split()
+    if not words:
+        return ""
+    lines, current, length = [], [], 0
+    for word in words:
+        extra = len(word) + (1 if current else 0)
+        if current and length + extra > max_chars:
+            lines.append(" ".join(current))
+            current, length = [word], len(word)
+        else:
+            current.append(word)
+            length += extra
+    if current:
+        lines.append(" ".join(current))
+    if len(lines) <= 2:
+        return "\n".join(lines)
+    # Keep all words while limiting the overlay to two lines.
+    return lines[0] + "\n" + " ".join(lines[1:])
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def update_subtitles(surah: int, ayah: int) -> None:
+    arabic = _ayah_text(ARABIC_DATA, surah, ayah)
+    english = _ayah_text(ENGLISH_DATA, surah, ayah)
+    if not arabic or not english:
+        raise RuntimeError(f"Missing Arabic/English text for {surah}:{ayah}")
+    _atomic_write(ARABIC_SUBTITLE, _wrap_text(arabic, 55))
+    _atomic_write(ENGLISH_SUBTITLE, _wrap_text(english, 88))
+    _atomic_write(
+        META_SUBTITLE,
+        f"SURAH {SURAH_MAP[surah][1].upper()}  •  AYAH {ayah} / {SURAH_MAP[surah][3]}",
+    )
+
+
+def _ffmpeg_path(path: Path) -> str:
+    # Escape characters that have meaning in an FFmpeg filtergraph.
+    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
 def validate_environment() -> None:
     if not STREAM_KEY:
         raise RuntimeError(
@@ -108,9 +179,11 @@ def validate_environment() -> None:
         )
     if not BACKGROUND_FILE.exists():
         raise RuntimeError(f"Missing livestream background: {BACKGROUND_FILE}")
-    for required in (ARABIC_DATA_FILE, ENGLISH_DATA_FILE, ARABIC_FONT_FILE):
-        if not required.exists():
-            raise RuntimeError(f"Missing livestream subtitle resource: {required}")
+    if not SYSTEM_FONT or not Path(SYSTEM_FONT).exists():
+        raise RuntimeError(f"Required system font is unavailable: {SYSTEM_FONT}")
+    if not ARABIC_DATA_FILE.exists() or not ENGLISH_DATA_FILE.exists():
+        raise RuntimeError("arabic.json and english.json must exist in the repository root.")
+    SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
     for binary in ("ffmpeg", "ffprobe"):
         if subprocess.run(
             ["bash", "-lc", f"command -v {binary} >/dev/null 2>&1"],
@@ -228,46 +301,39 @@ def decode_to_pcm(mp3: Path) -> subprocess.Popen:
     )
 
 
-def _ffmpeg_filter() -> str:
-    """Build the live video filter with Arabic + English text overlays."""
-    from live.live_config import ARABIC_FONT_FILE, ENGLISH_FONT_FILE, SUBTITLE_DIR
-
-    def esc(p: Path) -> str:
-        # FFmpeg filtergraph escaping for Windows-style punctuation isn't needed
-        # on the Linux GitHub runner, but escape ':' and '\\' defensively.
-        return str(p).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
-
-    ar, en, meta = subtitle_files()
-    ar_font = esc(ARABIC_FONT_FILE)
-    en_font = esc(ENGLISH_FONT_FILE)
-    ar_txt, en_txt, meta_txt = map(esc, (ar, en, meta))
-
-    return (
-        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-        f"drawtext=fontfile='{en_font}':textfile='{meta_txt}':reload=1:"
-        f"fontcolor=white:fontsize=34:borderw=2:bordercolor=black@0.75:"
-        f"x=(w-text_w)/2:y=70,"
-        f"drawtext=fontfile='{ar_font}':textfile='{ar_txt}':reload=1:"
-        f"fontcolor=white:fontsize=50:borderw=3:bordercolor=black@0.85:"
-        f"text_shaping=1:fix_bounds=1:line_spacing=10:"
-        f"x=(w-text_w)/2:y=h-320,"
-        f"drawtext=fontfile='{en_font}':textfile='{en_txt}':reload=1:"
-        f"fontcolor=white:fontsize=28:borderw=2:bordercolor=black@0.80:"
-        f"x=(w-text_w)/2:y=h-150"
-    )
-
-
 def start_encoder() -> subprocess.Popen:
-    """Start one long-running FFmpeg encoder using the MP4 as a looping video."""
+    """Start one FFmpeg encoder using the looping MP4 background.
+
+    The Quran audio arrives through stdin. The MP4 is looped indefinitely with
+    -stream_loop -1. Arabic/English/meta text files are reloaded by drawtext
+    while the same encoder remains alive across all ayahs.
+    """
     rtmp_target = RTMP_URL.rstrip("/") + "/" + STREAM_KEY
-    vf = _ffmpeg_filter()
+    update_subtitles(*load_state())
+
+    bg = str(BACKGROUND_FILE)
+    ar = _ffmpeg_path(ARABIC_SUBTITLE)
+    en = _ffmpeg_path(ENGLISH_SUBTITLE)
+    meta = _ffmpeg_path(META_SUBTITLE)
+    font = _ffmpeg_path(Path(SYSTEM_FONT))
+
+    subtitle_filter = (
+        f"drawtext=fontfile='{font}':textfile='{meta}':reload=1:"
+        f"fontcolor=0xE8D9A8:fontsize=34:x=(w-text_w)/2:y=80:"
+        f"box=1:boxcolor=black@0.48:boxborderw=18,"
+        f"drawtext=fontfile='{font}':textfile='{ar}':reload=1:text_shaping=1:"
+        f"fontcolor=white:fontsize=48:x=(w-text_w)/2:y=h-360:"
+        f"box=1:boxcolor=black@0.60:boxborderw=28,"
+        f"drawtext=fontfile='{font}':textfile='{en}':reload=1:"
+        f"fontcolor=0xF2F2F2:fontsize=30:x=(w-text_w)/2:y=h-190:"
+        f"box=1:boxcolor=black@0.60:boxborderw=20"
+    )
 
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
-        "-re",
         "-stream_loop", "-1",
-        "-i", str(BACKGROUND_FILE),
+        "-re",
+        "-i", bg,
         "-re",
         "-f", "s16le",
         "-ar", str(SAMPLE_RATE),
@@ -275,7 +341,8 @@ def start_encoder() -> subprocess.Popen:
         "-i", "pipe:0",
         "-map", "0:v:0",
         "-map", "1:a:0",
-        "-vf", vf,
+        "-vf", f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
+               f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,{subtitle_filter}",
         "-r", str(FPS),
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -295,10 +362,14 @@ def start_encoder() -> subprocess.Popen:
         rtmp_target,
     ]
 
-    log.info("Arabic subtitle font: %s", ARABIC_FONT_FILE)
-    log.info("English subtitle font: %s", ENGLISH_FONT_FILE)
-    log.info("Starting FFmpeg encoder: %dx%d @ %dfps, %s video / %s audio", WIDTH, HEIGHT, FPS, VIDEO_BITRATE, AUDIO_BITRATE)
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=None, bufsize=0)
+    log.info(
+        "Starting FFmpeg encoder: %dx%d @ %dfps, %s video / %s audio",
+        WIDTH, HEIGHT, FPS, VIDEO_BITRATE, AUDIO_BITRATE,
+    )
+    return subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=None, bufsize=0
+    )
+
 
 def feed_ayah(encoder: subprocess.Popen, surah: int, ayah: int) -> None:
     mp3 = download_ayah(surah, ayah)
@@ -376,7 +447,7 @@ def run_stream() -> None:
                 "LIVE %d:%d — %s / %s",
                 surah, ayah, SURAH_MAP[surah][1], SURAH_MAP[surah][2],
             )
-            prepare_subtitles(surah, ayah, SURAH_MAP[surah][1], SURAH_MAP[surah][3])
+            update_subtitles(surah, ayah)
             feed_ayah(encoder, surah, ayah)
 
             if encoder.poll() is not None:
