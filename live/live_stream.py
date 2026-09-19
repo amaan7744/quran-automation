@@ -5,7 +5,7 @@
 Architecture:
     EveryAyah MP3 -> per-ayah decode -> raw PCM stdin
                                       |
-    looping MP4 background -> FFmpeg --+--> H.264/AAC -> YouTube RTMPS
+    steady PNG background -> FFmpeg --+--> H.264/AAC -> YouTube RTMPS
 
 There is deliberately ONE long-running FFmpeg process while the Python
 supervisor feeds it Quran audio in strict mushaf order. The background never
@@ -36,10 +36,11 @@ if str(ROOT_DIR) not in sys.path:
 import requests
 
 from surah_data import SURAHS
-from live.live_subtitles import prepare_subtitles, subtitle_files
 from live.live_config import (
     AUDIO_BITRATE,
+    ARABIC_DATA_FILE,
     ARABIC_FONT_FILE,
+    ENGLISH_DATA_FILE,
     ENGLISH_FONT_FILE,
     SUBTITLE_DIR,
     BACKGROUND_FILE,
@@ -68,6 +69,8 @@ from live.live_config import (
     VIDEO_MAXRATE,
     WIDTH,
 )
+
+from live.live_subtitles import prepare_subtitles, subtitle_files
 
 LOG_DIR = ROOT_DIR / "logs" / "live"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,46 +108,15 @@ def validate_environment() -> None:
         )
     if not BACKGROUND_FILE.exists():
         raise RuntimeError(f"Missing livestream background: {BACKGROUND_FILE}")
-
-    if BACKGROUND_FILE.suffix.lower() != ".mp4":
-        raise RuntimeError(
-            f"Livestream background must be an MP4 video: {BACKGROUND_FILE}"
-        )
-
+    for required in (ARABIC_DATA_FILE, ENGLISH_DATA_FILE, ARABIC_FONT_FILE):
+        if not required.exists():
+            raise RuntimeError(f"Missing livestream subtitle resource: {required}")
     for binary in ("ffmpeg", "ffprobe"):
         if subprocess.run(
             ["bash", "-lc", f"command -v {binary} >/dev/null 2>&1"],
             capture_output=True,
         ).returncode != 0:
             raise RuntimeError(f"{binary} is required but was not found in PATH.")
-
-    # Fail before the Quran loop if the background cannot be decoded.
-    probe = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name,width,height",
-            "-of", "default=noprint_wrappers=1",
-            str(BACKGROUND_FILE),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if probe.returncode != 0 or "codec_name=" not in probe.stdout:
-        raise RuntimeError(
-            "FFmpeg could not decode live/background.mp4. "
-            f"ffprobe: {probe.stderr.strip()[-1000:]}"
-        )
-
-    required_files = (
-        ARABIC_FONT_FILE,
-        ENGLISH_FONT_FILE,
-        ARABIC_DATA_FILE,
-        ENGLISH_DATA_FILE,
-    )
-    for path in required_files:
-        if not path.exists():
-            raise RuntimeError(f"Missing livestream subtitle asset: {path}")
 
 
 def load_state() -> tuple[int, int]:
@@ -256,55 +228,39 @@ def decode_to_pcm(mp3: Path) -> subprocess.Popen:
     )
 
 
-def _ffmpeg_filter_path(path: Path) -> str:
-    """Escape a Unix path for FFmpeg filter syntax."""
-    return str(path).replace("\\", r"\\").replace(":", r"\:").replace("'", r"\'")
+def _ffmpeg_filter() -> str:
+    """Build the live video filter with Arabic + English text overlays."""
+    from live.live_config import ARABIC_FONT_FILE, ENGLISH_FONT_FILE, SUBTITLE_DIR
+
+    def esc(p: Path) -> str:
+        # FFmpeg filtergraph escaping for Windows-style punctuation isn't needed
+        # on the Linux GitHub runner, but escape ':' and '\\' defensively.
+        return str(p).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
+
+    ar, en, meta = subtitle_files()
+    ar_font = esc(ARABIC_FONT_FILE)
+    en_font = esc(ENGLISH_FONT_FILE)
+    ar_txt, en_txt, meta_txt = map(esc, (ar, en, meta))
+
+    return (
+        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
+        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+        f"drawtext=fontfile='{en_font}':textfile='{meta_txt}':reload=1:"
+        f"fontcolor=white:fontsize=34:borderw=2:bordercolor=black@0.75:"
+        f"x=(w-text_w)/2:y=70,"
+        f"drawtext=fontfile='{ar_font}':textfile='{ar_txt}':reload=1:"
+        f"fontcolor=white:fontsize=48:borderw=3:bordercolor=black@0.80:"
+        f"text_shaping=1:x=(w-text_w)/2:y=h-300,"
+        f"drawtext=fontfile='{en_font}':textfile='{en_txt}':reload=1:"
+        f"fontcolor=white:fontsize=28:borderw=2:bordercolor=black@0.80:"
+        f"x=(w-text_w)/2:y=h-150"
+    )
 
 
 def start_encoder() -> subprocess.Popen:
-    """
-    One FFmpeg encoder for the entire live session.
-
-    The background is an MP4, so `-stream_loop -1` is used. The Arabic and
-    English subtitle files are reloaded by drawtext while the encoder remains
-    alive; Python replaces those files at each ayah boundary.
-    """
+    """Start one long-running FFmpeg encoder using the MP4 as a looping video."""
     rtmp_target = RTMP_URL.rstrip("/") + "/" + STREAM_KEY
-
-    arabic_file, english_file, meta_file = subtitle_files()
-    for p in (arabic_file, english_file, meta_file):
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if not p.exists():
-            p.write_text("", encoding="utf-8")
-
-    bg = _ffmpeg_filter_path(BACKGROUND_FILE)
-    ar_file = _ffmpeg_filter_path(arabic_file)
-    en_file = _ffmpeg_filter_path(english_file)
-    meta = _ffmpeg_filter_path(meta_file)
-    ar_font = _ffmpeg_filter_path(ARABIC_FONT_FILE)
-    en_font = _ffmpeg_filter_path(ENGLISH_FONT_FILE)
-
-    # Keep all subtitle styling inside FFmpeg so the background video itself
-    # remains untouched.
-    vf = (
-        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-        # dark translucent panel behind subtitles
-        "drawbox=x=60:y=720:w=1800:h=290:color=black@0.55:t=fill,"
-        # metadata
-        f"drawtext=fontfile='{en_font}':textfile='{meta}':reload=1:"
-        "fontcolor=white:fontsize=30:x=(w-text_w)/2:y=735:"
-        "box=0:shadowcolor=black@0.9:shadowx=2:shadowy=2,"
-        # Arabic
-        f"drawtext=fontfile='{ar_font}':textfile='{ar_file}':reload=1:"
-        "text_shaping=1:fontcolor=white:fontsize=52:"
-        "x=(w-text_w)/2:y=785:line_spacing=10:"
-        "shadowcolor=black@0.95:shadowx=3:shadowy=3,"
-        # English
-        f"drawtext=fontfile='{en_font}':textfile='{en_file}':reload=1:"
-        "fontcolor=white:fontsize=30:x=(w-text_w)/2:y=925:"
-        "line_spacing=8:shadowcolor=black@0.95:shadowx=2:shadowy=2"
-    )
+    vf = _ffmpeg_filter()
 
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
@@ -338,19 +294,8 @@ def start_encoder() -> subprocess.Popen:
         rtmp_target,
     ]
 
-    # Never log the command: it contains the secret stream key.
-    log.info(
-        "Starting FFmpeg encoder: %dx%d @ %dfps, %s video / %s audio",
-        WIDTH, HEIGHT, FPS, VIDEO_BITRATE, AUDIO_BITRATE,
-    )
-    return subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=None,
-        bufsize=0,
-    )
-
+    log.info("Starting FFmpeg encoder: %dx%d @ %dfps, %s video / %s audio", WIDTH, HEIGHT, FPS, VIDEO_BITRATE, AUDIO_BITRATE)
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=None, bufsize=0)
 
 def feed_ayah(encoder: subprocess.Popen, surah: int, ayah: int) -> None:
     mp3 = download_ayah(surah, ayah)
@@ -428,12 +373,7 @@ def run_stream() -> None:
                 "LIVE %d:%d — %s / %s",
                 surah, ayah, SURAH_MAP[surah][1], SURAH_MAP[surah][2],
             )
-            prepare_subtitles(
-                surah,
-                ayah,
-                SURAH_MAP[surah][1],
-                SURAH_MAP[surah][3],
-            )
+            prepare_subtitles(surah, ayah, SURAH_MAP[surah][1], SURAH_MAP[surah][3])
             feed_ayah(encoder, surah, ayah)
 
             if encoder.poll() is not None:
