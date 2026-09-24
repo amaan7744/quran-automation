@@ -1565,6 +1565,19 @@
         "instagram": null
       },
       "upload_state": "partially_uploaded"
+    },
+    {
+      "hash": "8cbc2103afd0f22cd36559956fa5c4e309b7318f9d14c25cfb839e1cc82f3db5",
+      "title": "Surah Al-Baqarah 2:247-247 | Quran",
+      "surah_num": 2,
+      "last_ayah": 247,
+      "timestamp": "2026-09-24T00:16:59Z",
+      "results": {
+        "youtube": "5tjYoCQvbww",
+        "facebook": "1738277814130624",
+        "instagram": "17998778981814160"
+      },
+      "upload_state": "fully_uploaded"
     }
   ]
 }
