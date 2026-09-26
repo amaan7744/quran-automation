@@ -75,16 +75,16 @@
         "views": 1030,
         "likes": 138,
         "comments": 2,
-        "age_days": 26.67665560509259,
+        "age_days": 27.664529306875,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.473,
+        "score": 0.4603,
         "components": {
           "retention": null,
-          "pace": 0.26213593516040995,
+          "pace": 0.24447277120904487,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -196,19 +196,19 @@
       },
       "uploaded_at_utc": "2026-08-31T19:44:10Z",
       "metrics": {
-        "views": 674,
+        "views": 675,
         "likes": 131,
         "comments": 2,
-        "age_days": 24.627455587893518,
+        "age_days": 25.61532962986111,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.4182,
+        "score": 0.4091,
         "components": {
           "retention": null,
-          "pace": 0.18548917697396608,
+          "pace": 0.17276316867645616,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -349,19 +349,19 @@
       },
       "uploaded_at_utc": "2026-08-31T22:26:53Z",
       "metrics": {
-        "views": 1071,
+        "views": 1072,
         "likes": 107,
         "comments": 2,
-        "age_days": 24.514216094849537,
+        "age_days": 25.50209036521991,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.4979,
+        "score": 0.4831,
         "components": {
           "retention": null,
-          "pace": 0.29702284479889374,
+          "pace": 0.276339706287575,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -464,16 +464,16 @@
         "views": 1141,
         "likes": 203,
         "comments": 0,
-        "age_days": 23.72249393699074,
+        "age_days": 24.710367343206016,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.5195,
+        "score": 0.5027,
         "components": {
           "retention": null,
-          "pace": 0.32736033368808787,
+          "pace": 0.30383863879030293,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -570,16 +570,16 @@
         "views": 1222,
         "likes": 164,
         "comments": 2,
-        "age_days": 23.596800629085646,
+        "age_days": 24.58467457246528,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.5377,
+        "score": 0.5195,
         "components": {
           "retention": null,
-          "pace": 0.3528267094340419,
+          "pace": 0.32735976289246416,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -682,16 +682,16 @@
         "views": 889,
         "likes": 195,
         "comments": 2,
-        "age_days": 22.72973102115741,
+        "age_days": 23.717604890972222,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.4757,
+        "score": 0.4617,
         "components": {
           "retention": null,
-          "pace": 0.2659790816144932,
+          "pace": 0.246449887041293,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -785,19 +785,19 @@
       },
       "uploaded_at_utc": "2026-09-02T20:24:53Z",
       "metrics": {
-        "views": 1253,
+        "views": 1254,
         "likes": 253,
         "comments": 1,
-        "age_days": 22.599049247905093,
+        "age_days": 23.586923563101852,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.5559,
+        "score": 0.5361,
         "components": {
           "retention": null,
-          "pace": 0.3782676098384744,
+          "pace": 0.3505474871477557,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -894,16 +894,16 @@
         "views": 3650,
         "likes": 641,
         "comments": 2,
-        "age_days": 20.740693866747684,
+        "age_days": 21.72856896537037,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.1627,
+        "score": 1.0924,
         "components": {
           "retention": null,
-          "pace": 1.2277389722033394,
+          "pace": 1.1293740667694032,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1000,16 +1000,16 @@
         "views": 2126,
         "likes": 385,
         "comments": 3,
-        "age_days": 19.78002367203704,
+        "age_days": 20.767899123726853,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8155,
+        "score": 0.7726,
         "components": {
           "retention": null,
-          "pace": 0.7417281383527071,
+          "pace": 0.6816494178657438,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1106,16 +1106,16 @@
         "views": 1741,
         "likes": 239,
         "comments": 1,
-        "age_days": 19.62156495349537,
+        "age_days": 20.609439981342593,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.722,
+        "score": 0.6866,
         "components": {
           "retention": null,
-          "pace": 0.6108400926532987,
+          "pace": 0.5612867172362702,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1218,16 +1218,16 @@
         "views": 3660,
         "likes": 684,
         "comments": 8,
-        "age_days": 18.771103088530094,
+        "age_days": 19.75897838175926,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.2643,
+        "score": 1.1805,
         "components": {
           "retention": null,
-          "pace": 1.3699586440662503,
+          "pace": 1.2526453636638857,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1312,16 +1312,16 @@
         "views": 2150,
         "likes": 374,
         "comments": 0,
-        "age_days": 18.621370369166666,
+        "age_days": 19.609245972152777,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8578,
+        "score": 0.8094,
         "components": {
           "retention": null,
-          "pace": 0.8009643014632678,
+          "pace": 0.7332249496368386,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1418,16 +1418,16 @@
         "views": 1660,
         "likes": 322,
         "comments": 0,
-        "age_days": 17.68433442099537,
+        "age_days": 18.672210754953703,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.7496,
+        "score": 0.7093,
         "components": {
           "retention": null,
-          "pace": 0.6493906976330509,
+          "pace": 0.5930381350294214,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1524,16 +1524,16 @@
         "views": 2038,
         "likes": 402,
         "comments": 3,
-        "age_days": 17.570990499502315,
+        "age_days": 18.558867231180557,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8618,
+        "score": 0.8112,
         "components": {
           "retention": null,
-          "pace": 0.8064707995759866,
+          "pace": 0.735690635419973,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1666,16 +1666,16 @@
         "views": 1462,
         "likes": 319,
         "comments": 1,
-        "age_days": 16.583051835717594,
+        "age_days": 17.570929226631943,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.7219,
+        "score": 0.6825,
         "components": {
           "retention": null,
-          "pace": 0.610653070210897,
+          "pace": 0.5555177022092528,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1781,19 +1781,19 @@
       },
       "uploaded_at_utc": "2026-09-09T17:22:23Z",
       "metrics": {
-        "views": 1905,
+        "views": 1906,
         "likes": 368,
         "comments": 1,
-        "age_days": 15.725737998634258,
+        "age_days": 16.71361578883102,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8894,
+        "score": 0.8329,
         "components": {
           "retention": null,
-          "pace": 0.8450977419757065,
+          "pace": 0.7659924084375512,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -1890,16 +1890,16 @@
         "views": 2002,
         "likes": 476,
         "comments": 0,
-        "age_days": 15.600565500509258,
+        "age_days": 16.58844342789352,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.927,
+        "score": 0.8661,
         "components": {
           "retention": null,
-          "pace": 0.897760535920653,
+          "pace": 0.8125013123046982,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2002,16 +2002,16 @@
         "views": 3981,
         "likes": 1016,
         "comments": 1,
-        "age_days": 14.732916203761574,
+        "age_days": 15.720794485520832,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.6752,
+        "score": 1.5334,
         "components": {
           "retention": null,
-          "pace": 1.9453005138965676,
+          "pace": 1.7467035907261756,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2168,16 +2168,16 @@
         "views": 1249,
         "likes": 264,
         "comments": 2,
-        "age_days": 14.588033007175925,
+        "age_days": 15.575911772650464,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.7123,
+        "score": 0.6702,
         "components": {
           "retention": null,
-          "pace": 0.5972182852996726,
+          "pace": 0.5382910888591825,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2268,16 +2268,16 @@
         "views": 1254,
         "likes": 226,
         "comments": 2,
-        "age_days": 13.735557797511573,
+        "age_days": 14.72343637875,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.7416,
+        "score": 0.6948,
         "components": {
           "retention": null,
-          "pace": 0.6382548090710672,
+          "pace": 0.5727542362355417,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2377,19 +2377,19 @@
       },
       "uploaded_at_utc": "2026-09-11T20:27:18Z",
       "metrics": {
-        "views": 2262,
+        "views": 2263,
         "likes": 312,
         "comments": 1,
-        "age_days": 13.597295005694445,
+        "age_days": 14.585173975439815,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.1295,
+        "score": 1.0408,
         "components": {
           "retention": null,
-          "pace": 1.1812388412326804,
+          "pace": 1.057146921740688,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2492,16 +2492,16 @@
         "views": 1459,
         "likes": 349,
         "comments": 2,
-        "age_days": 12.76871990412037,
+        "age_days": 13.756599121770835,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8609,
+        "score": 0.7985,
         "components": {
           "retention": null,
-          "pace": 0.8052899123133832,
+          "pace": 0.7178522171114506,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2628,16 +2628,16 @@
         "views": 99,
         "likes": 19,
         "comments": 2,
-        "age_days": 11.732609866388888,
+        "age_days": 12.72048973824074,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.3274,
+        "score": 0.3228,
         "components": {
           "retention": null,
-          "pace": 0.05838765412342016,
+          "pace": 0.05186126521211622,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2740,16 +2740,16 @@
         "views": 1135,
         "likes": 329,
         "comments": 1,
-        "age_days": 10.671603986574073,
+        "age_days": 11.659484855798611,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8215,
+        "score": 0.7564,
         "components": {
           "retention": null,
-          "pace": 0.7500836466329972,
+          "pace": 0.6589828587830822,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2864,16 +2864,16 @@
         "views": 301,
         "likes": 42,
         "comments": 0,
-        "age_days": 10.5561073115625,
+        "age_days": 11.543988926597223,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.4275,
+        "score": 0.4104,
         "components": {
           "retention": null,
-          "pace": 0.1984779623278067,
+          "pace": 0.1745728129657728,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -2979,19 +2979,19 @@
       },
       "uploaded_at_utc": "2026-09-15T17:51:31Z",
       "metrics": {
-        "views": 1204,
+        "views": 1205,
         "likes": 232,
         "comments": 1,
-        "age_days": 9.705494759270833,
+        "age_days": 10.693377298657408,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.9145,
+        "score": 0.8332,
         "components": {
           "retention": null,
-          "pace": 0.8803167736111366,
+          "pace": 0.7664342652750543,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3064,16 +3064,16 @@
         "views": 304,
         "likes": 43,
         "comments": 0,
-        "age_days": 9.587035182858795,
+        "age_days": 10.57491833079861,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.444,
+        "score": 0.4236,
         "components": {
           "retention": null,
-          "pace": 0.22153537047768787,
+          "pace": 0.19299286566013701,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3197,19 +3197,19 @@
       },
       "uploaded_at_utc": "2026-09-16T17:55:51Z",
       "metrics": {
-        "views": 845,
+        "views": 846,
         "likes": 142,
         "comments": 0,
-        "age_days": 8.702638082361112,
+        "age_days": 9.69052158181713,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.777,
+        "score": 0.709,
         "components": {
           "retention": null,
-          "pace": 0.6877317757119433,
+          "pace": 0.5925688216935024,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3341,16 +3341,16 @@
         "views": 1074,
         "likes": 164,
         "comments": 0,
-        "age_days": 8.576585895324074,
+        "age_days": 9.564469889039351,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.9243,
+        "score": 0.8335,
         "components": {
           "retention": null,
-          "pace": 0.8940349860340963,
+          "pace": 0.7668824656403016,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3459,16 +3459,16 @@
         "views": 703,
         "likes": 129,
         "comments": 0,
-        "age_days": 7.707512888587963,
+        "age_days": 8.695397381643518,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.7491,
+        "score": 0.6788,
         "components": {
           "retention": null,
-          "pace": 0.6487239062885978,
+          "pace": 0.5502564731243785,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3600,16 +3600,16 @@
         "views": 85,
         "likes": 20,
         "comments": 0,
-        "age_days": 7.571495471921297,
+        "age_days": 8.559380276527778,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.342,
+        "score": 0.3335,
         "components": {
           "retention": null,
-          "pace": 0.07875054409262237,
+          "pace": 0.0668349375064966,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3739,19 +3739,19 @@
       },
       "uploaded_at_utc": "2026-09-18T17:18:17Z",
       "metrics": {
-        "views": 221,
-        "likes": 36,
+        "views": 226,
+        "likes": 38,
         "comments": 0,
-        "age_days": 6.728637665034722,
+        "age_days": 7.716523050092592,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.4511,
+        "score": 0.427,
         "components": {
           "retention": null,
-          "pace": 0.2315034932537973,
+          "pace": 0.197838724544534,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -3898,19 +3898,19 @@
       },
       "uploaded_at_utc": "2026-09-18T20:28:39Z",
       "metrics": {
-        "views": 1103,
-        "likes": 136,
+        "views": 1105,
+        "likes": 137,
         "comments": 0,
-        "age_days": 6.596660231793981,
+        "age_days": 7.584545776701389,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.1526,
+        "score": 1.0046,
         "components": {
           "retention": null,
-          "pace": 1.2136030679388756,
+          "pace": 1.0064659682342776,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4016,19 +4016,19 @@
       },
       "uploaded_at_utc": "2026-09-19T00:02:59Z",
       "metrics": {
-        "views": 1064,
+        "views": 1065,
         "likes": 178,
         "comments": 0,
-        "age_days": 6.447506229155092,
+        "age_days": 7.435392067291667,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.1456,
+        "score": 0.9947,
         "components": {
           "retention": null,
-          "pace": 1.203855097617813,
+          "pace": 0.9926483511230104,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4152,19 +4152,19 @@
       },
       "uploaded_at_utc": "2026-09-19T18:21:24Z",
       "metrics": {
-        "views": 931,
+        "views": 933,
         "likes": 154,
         "comments": 0,
-        "age_days": 5.684880115486111,
+        "age_days": 6.672766416504629,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.1442,
+        "score": 0.9802,
         "components": {
           "retention": null,
-          "pace": 1.2018117243423656,
+          "pace": 0.9722980067971478,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4264,19 +4264,19 @@
       },
       "uploaded_at_utc": "2026-09-19T23:55:48Z",
       "metrics": {
-        "views": 588,
+        "views": 589,
         "likes": 98,
         "comments": 0,
-        "age_days": 5.452531554664351,
+        "age_days": 6.440418305752314,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 0.8477,
+        "score": 0.7376,
         "components": {
           "retention": null,
-          "pace": 0.7867207343799015,
+          "pace": 0.6326030459423019,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4376,19 +4376,19 @@
       },
       "uploaded_at_utc": "2026-09-20T14:12:49Z",
       "metrics": {
-        "views": 1578,
+        "views": 1579,
         "likes": 320,
         "comments": 0,
-        "age_days": 4.857312753182871,
+        "age_days": 5.8451997020370365,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 2.0706,
+        "score": 1.6738,
         "components": {
           "retention": null,
-          "pace": 2.498804507921113,
+          "pace": 1.9432902161766241,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4488,19 +4488,19 @@
       },
       "uploaded_at_utc": "2026-09-20T23:50:44Z",
       "metrics": {
-        "views": 888,
+        "views": 889,
         "likes": 191,
         "comments": 0,
-        "age_days": 4.456064524722223,
+        "age_days": 5.443951042835648,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.3657,
+        "score": 1.1148,
         "components": {
           "retention": null,
-          "pace": 1.5119164962261982,
+          "pace": 1.1606556674404571,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4618,19 +4618,19 @@
       },
       "uploaded_at_utc": "2026-09-21T16:34:23Z",
       "metrics": {
-        "views": 1261,
-        "likes": 196,
+        "views": 1275,
+        "likes": 202,
         "comments": 1,
-        "age_days": 3.7592368003472223,
+        "age_days": 4.747123586458334,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 2.1886,
+        "score": 1.6902,
         "components": {
           "retention": null,
-          "pace": 2.6640404276954683,
+          "pace": 1.9662314617174887,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4748,19 +4748,19 @@
       },
       "uploaded_at_utc": "2026-09-22T14:49:04Z",
       "metrics": {
-        "views": 1212,
-        "likes": 196,
+        "views": 1280,
+        "likes": 227,
         "comments": 0,
-        "age_days": 2.832247876099537,
+        "age_days": 3.8201347600694446,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 2.4286,
+        "score": 2.0879,
         "components": {
           "retention": null,
-          "pace": 3.0,
+          "pace": 2.5230113769228595,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -4866,19 +4866,19 @@
       },
       "uploaded_at_utc": "2026-09-23T00:06:54Z",
       "metrics": {
-        "views": 655,
-        "likes": 83,
+        "views": 684,
+        "likes": 95,
         "comments": 0,
-        "age_days": 2.444806690474537,
+        "age_days": 3.4326941009375003,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
       },
       "performance_score": {
-        "score": 1.8771,
+        "score": 1.3447,
         "components": {
           "retention": null,
-          "pace": 2.227980257756489,
+          "pace": 1.4825576718686573,
           "subscriber": null,
           "engagement": 1.0
         },
@@ -5013,10 +5013,10 @@
       },
       "uploaded_at_utc": "2026-09-23T15:04:07Z",
       "metrics": {
-        "views": 1265,
-        "likes": 128,
+        "views": 1294,
+        "likes": 139,
         "comments": 2,
-        "age_days": 1.8219140969560186,
+        "age_days": 2.809801860763889,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
@@ -5149,10 +5149,10 @@
       },
       "uploaded_at_utc": "2026-09-24T00:16:59Z",
       "metrics": {
-        "views": 953,
-        "likes": 141,
+        "views": 1032,
+        "likes": 173,
         "comments": 0,
-        "age_days": 1.4380029303935185,
+        "age_days": 2.4258910952777777,
         "average_view_duration": null,
         "average_percentage_viewed": null,
         "subscribers_gained": null
@@ -5271,7 +5271,29 @@
         "facebook_video_id": "2150065415913335",
         "instagram_media_id": "18012003272982542"
       },
-      "uploaded_at_utc": "2026-09-25T00:24:20Z"
+      "uploaded_at_utc": "2026-09-25T00:24:20Z",
+      "metrics": {
+        "views": 630,
+        "likes": 78,
+        "comments": 0,
+        "age_days": 1.4067372738657407,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "subscribers_gained": null
+      },
+      "performance_score": {
+        "score": 2.4286,
+        "components": {
+          "retention": null,
+          "pace": 3.0,
+          "subscriber": null,
+          "engagement": 1.0
+        },
+        "missing_metrics": [
+          "average_percentage_viewed",
+          "subscribers_gained"
+        ]
+      }
     },
     "2453e5fef639846067c68007d418a7e1f3b889246294ecf997d55297f54b5013": {
       "title": "Surah Al-Baqarah 2:249-249 | Quran",
@@ -5504,131 +5526,131 @@
   "template_stats": {
     "reflection": {
       "TEMPLATE_10_CINEMATIC_NATURE": {
-        "count": 26,
-        "avg_score": 0.5325115384615383
+        "count": 27,
+        "avg_score": 0.5298370370370369
       },
       "TEMPLATE_01_COSMIC": {
-        "count": 47,
-        "avg_score": 0.5677297872340423
+        "count": 49,
+        "avg_score": 0.5635081632653058
       },
       "TEMPLATE_08_CLOUDS": {
-        "count": 114,
-        "avg_score": 0.9516307017543856
+        "count": 121,
+        "avg_score": 0.9367272727272722
       },
       "TEMPLATE_04_RAIN": {
-        "count": 23,
-        "avg_score": 2.118078260869565
+        "count": 28,
+        "avg_score": 2.0295535714285715
       },
       "TEMPLATE_07_DEEP_WATER": {
-        "count": 18,
-        "avg_score": 0.9755166666666669
+        "count": 21,
+        "avg_score": 0.9239380952380953
       },
       "TEMPLATE_06_ISLAMIC_ARCHITECTURE": {
-        "count": 13,
-        "avg_score": 1.018484615384615
+        "count": 15,
+        "avg_score": 0.971233333333333
       }
     },
     "creation": {
       "TEMPLATE_08_CLOUDS": {
-        "count": 31,
-        "avg_score": 0.7728677419354838
+        "count": 33,
+        "avg_score": 0.7627454545454544
       }
     },
     "mercy": {
       "TEMPLATE_08_CLOUDS": {
-        "count": 53,
-        "avg_score": 1.0524018867924525
+        "count": 58,
+        "avg_score": 1.0417413793103445
       }
     },
     "warning": {
       "TEMPLATE_01_COSMIC": {
-        "count": 22,
-        "avg_score": 0.6954681818181817
+        "count": 23,
+        "avg_score": 0.6885391304347825
       },
       "TEMPLATE_03_LIGHT_BREAKING": {
-        "count": 16,
-        "avg_score": 0.9197874999999999
+        "count": 17,
+        "avg_score": 0.9058294117647057
       },
       "TEMPLATE_07_DEEP_WATER": {
-        "count": 22,
-        "avg_score": 1.1144136363636363
+        "count": 24,
+        "avg_score": 1.0842
       },
       "TEMPLATE_02_MOONLIGHT": {
-        "count": 1,
+        "count": 2,
         "avg_score": 2.4286
       }
     },
     "repentance": {
       "TEMPLATE_07_DEEP_WATER": {
-        "count": 20,
-        "avg_score": 1.3855299999999997
+        "count": 21,
+        "avg_score": 1.3715714285714282
       },
       "TEMPLATE_01_COSMIC": {
-        "count": 19,
-        "avg_score": 0.8962368421052632
+        "count": 20,
+        "avg_score": 0.885755
       },
       "TEMPLATE_08_CLOUDS": {
-        "count": 13,
-        "avg_score": 1.608869230769231
+        "count": 14,
+        "avg_score": 1.5682928571428574
       },
       "TEMPLATE_02_MOONLIGHT": {
-        "count": 10,
-        "avg_score": 1.23455
+        "count": 11,
+        "avg_score": 1.1910818181818181
       },
       "TEMPLATE_03_LIGHT_BREAKING": {
-        "count": 6,
-        "avg_score": 1.7458666666666665
+        "count": 7,
+        "avg_score": 1.6399714285714284
       }
     },
     "gratitude": {
       "TEMPLATE_10_CINEMATIC_NATURE": {
-        "count": 18,
-        "avg_score": 1.0153999999999999
+        "count": 20,
+        "avg_score": 1.0707549999999997
       }
     },
     "akhirah": {
       "TEMPLATE_06_ISLAMIC_ARCHITECTURE": {
-        "count": 17,
-        "avg_score": 1.0811411764705885
+        "count": 18,
+        "avg_score": 1.0661444444444446
       }
     },
     "hardship": {
       "TEMPLATE_03_LIGHT_BREAKING": {
-        "count": 15,
-        "avg_score": 1.1672066666666665
+        "count": 16,
+        "avg_score": 1.1463124999999998
       },
       "TEMPLATE_10_CINEMATIC_NATURE": {
-        "count": 12,
-        "avg_score": 1.1985833333333333
+        "count": 13,
+        "avg_score": 1.1678076923076923
       }
     },
     "peace": {
       "TEMPLATE_07_DEEP_WATER": {
-        "count": 10,
-        "avg_score": 0.5414399999999999
+        "count": 11,
+        "avg_score": 0.5295272727272726
       },
       "TEMPLATE_03_LIGHT_BREAKING": {
-        "count": 2,
-        "avg_score": 2.4286
+        "count": 3,
+        "avg_score": 2.3150333333333335
       }
     }
   },
   "duration_stats": {
     "short_18_25": {
-      "count": 26,
-      "avg_score": 0.5325115384615383
+      "count": 27,
+      "avg_score": 0.5298370370370369
     },
     "long_31_33": {
-      "count": 98,
-      "avg_score": 0.9858448979591836
+      "count": 106,
+      "avg_score": 0.9882924528301886
     },
     "short_25_28": {
-      "count": 244,
-      "avg_score": 0.9852684426229521
+      "count": 258,
+      "avg_score": 0.9723794573643423
     },
     "medium_28_31": {
-      "count": 160,
-      "avg_score": 1.1353718750000006
+      "count": 181,
+      "avg_score": 1.1258607734806638
     }
   }
 }
