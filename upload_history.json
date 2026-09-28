@@ -1669,6 +1669,19 @@
         "instagram": "18038699147827436"
       },
       "upload_state": "fully_uploaded"
+    },
+    {
+      "hash": "eca12a3d08a399f732cdaae0d5e3384d46c46e8d45f4a70fa8286e36ffd6115b",
+      "title": "Surah Al-Baqarah 2:255-255 | Quran",
+      "surah_num": 2,
+      "last_ayah": 255,
+      "timestamp": "2026-09-28T18:16:44Z",
+      "results": {
+        "youtube": "NxRT8wFzeb0",
+        "facebook": "918578944403574",
+        "instagram": null
+      },
+      "upload_state": "partially_uploaded"
     }
   ]
 }
