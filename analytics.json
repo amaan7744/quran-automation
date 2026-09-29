@@ -6149,6 +6149,84 @@
         "facebook_video_id": "918578944403574"
       },
       "uploaded_at_utc": "2026-09-28T18:16:44Z"
+    },
+    "b690a33d8da3dc9eaf1d25376a83c5c8b02c25bed6c4ba49d4275c5678a803af": {
+      "title": "Surah Al-Baqarah 2:256-256 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 256,
+      "last_ayah": 256,
+      "duration": 19.5215,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "b690a33d8da3dc9eaf1d25376a83c5c8b02c25bed6c4ba49d4275c5678a803af",
+      "visual_template": "TEMPLATE_02_MOONLIGHT",
+      "visual_mood": "trust",
+      "visual_category": "night_sky",
+      "motion_styles": [
+        "drift_horizontal",
+        "pull_out",
+        "static",
+        "drift_horizontal",
+        "pull_out",
+        "drift_horizontal"
+      ],
+      "transition_style": "dissolve",
+      "color_grade": "moonlight",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "6/6",
+      "upload_time_utc": "2026-09-29T16:32:48Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-09-29T16:32:48Z"
     }
   },
   "template_stats": {
