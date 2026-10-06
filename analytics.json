@@ -7937,7 +7937,13 @@
         "performance_score": null,
         "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
       },
-      "recorded_at_utc": "2026-10-06T16:43:47Z"
+      "recorded_at_utc": "2026-10-06T16:43:47Z",
+      "platform_ids": {
+        "youtube_video_id": "SNURsd4bbBc",
+        "facebook_video_id": "1884713512557021",
+        "instagram_media_id": "18138365950532593"
+      },
+      "uploaded_at_utc": "2026-10-06T16:46:28Z"
     }
   },
   "template_stats": {
