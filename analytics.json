@@ -8549,6 +8549,90 @@
         "instagram_media_id": "18019809056728334"
       },
       "uploaded_at_utc": "2026-10-09T01:43:38Z"
+    },
+    "7cce52f87934956f5a977be1a4df9968437d1cc5cf8f2c0daf42ef33a780c3de": {
+      "title": "Surah Al-Baqarah 2:280-281 | Quran",
+      "surah": "Al-Baqarah",
+      "surah_num": 2,
+      "first_ayah": 280,
+      "last_ayah": 281,
+      "duration": 23.029876,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "7cce52f87934956f5a977be1a4df9968437d1cc5cf8f2c0daf42ef33a780c3de",
+      "visual_template": "TEMPLATE_03_LIGHT_BREAKING",
+      "visual_mood": "hardship",
+      "visual_category": "atmospheric_light",
+      "motion_styles": [
+        "push_in",
+        "push_in",
+        "push_in",
+        "drift_vertical",
+        "push_in",
+        "drift_vertical",
+        "push_in"
+      ],
+      "transition_style": "dissolve",
+      "color_grade": "warm_gold",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "7/7",
+      "upload_time_utc": "2026-10-09T17:00:15Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-10-09T17:00:15Z"
     }
   },
   "template_stats": {
