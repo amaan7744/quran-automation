@@ -9389,6 +9389,90 @@
         "instagram_media_id": "18121157911943619"
       },
       "uploaded_at_utc": "2026-10-13T17:39:57Z"
+    },
+    "d98cd02d91e4ddeb1a2918e53f459b9b14ec91659e429af525b710372c4b62c8": {
+      "title": "Surah Aali-Imran 3:1-3 | Quran",
+      "surah": "Aali-Imran",
+      "surah_num": 3,
+      "first_ayah": 1,
+      "last_ayah": 3,
+      "duration": 18.623189,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "d98cd02d91e4ddeb1a2918e53f459b9b14ec91659e429af525b710372c4b62c8",
+      "visual_template": "TEMPLATE_03_LIGHT_BREAKING",
+      "visual_mood": "reflection",
+      "visual_category": "atmospheric_light",
+      "motion_styles": [
+        "drift_vertical",
+        "push_in",
+        "push_in",
+        "push_in",
+        "push_in",
+        "push_in",
+        "push_in"
+      ],
+      "transition_style": "dissolve",
+      "color_grade": "warm_gold",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "7/7",
+      "upload_time_utc": "2026-10-14T00:51:18Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-10-14T00:51:18Z"
     }
   },
   "template_stats": {
