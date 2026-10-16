@@ -9879,6 +9879,84 @@
         "facebook_video_id": "1651453849889869"
       },
       "uploaded_at_utc": "2026-10-15T15:00:37Z"
+    },
+    "f9232000a8f8d9b977a516d5529c10d18777a49d5e5e2ec87235dcf2141d7ff8": {
+      "title": "Surah Aali-Imran 3:11-12 | Quran",
+      "surah": "Aali-Imran",
+      "surah_num": 3,
+      "first_ayah": 11,
+      "last_ayah": 12,
+      "duration": 20.757188,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "f9232000a8f8d9b977a516d5529c10d18777a49d5e5e2ec87235dcf2141d7ff8",
+      "visual_template": "TEMPLATE_03_LIGHT_BREAKING",
+      "visual_mood": "reflection",
+      "visual_category": "atmospheric_light",
+      "motion_styles": [
+        "push_in",
+        "drift_vertical",
+        "push_in",
+        "push_in",
+        "push_in",
+        "push_in"
+      ],
+      "transition_style": "dissolve",
+      "color_grade": "warm_gold",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "6/6",
+      "upload_time_utc": "2026-10-16T00:05:58Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-10-16T00:05:58Z"
     }
   },
   "template_stats": {
