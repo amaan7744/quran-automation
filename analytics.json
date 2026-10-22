@@ -11301,6 +11301,78 @@
         "instagram_media_id": "18071709047770267"
       },
       "uploaded_at_utc": "2026-10-21T15:03:38Z"
+    },
+    "67c25176d6a35ee890a812401f258d348d431d77fdeb3039fc57333e61c112c9": {
+      "title": "Surah Aali-Imran 3:29-29 | Quran",
+      "surah": "Aali-Imran",
+      "surah_num": 3,
+      "first_ayah": 29,
+      "last_ayah": 29,
+      "duration": 13.173688,
+      "duration_bucket": "medium_28_31",
+      "video_file": "output_video.mp4",
+      "video_hash": "67c25176d6a35ee890a812401f258d348d431d77fdeb3039fc57333e61c112c9",
+      "visual_template": "TEMPLATE_03_LIGHT_BREAKING",
+      "visual_mood": "reflection",
+      "visual_category": "atmospheric_light",
+      "motion_styles": [
+        "drift_vertical",
+        "drift_vertical",
+        "push_in",
+        "push_in",
+        "push_in"
+      ],
+      "transition_style": "fade",
+      "color_grade": "warm_gold",
+      "intro_enabled": false,
+      "intro_duration": 0.0,
+      "render_width": 1440,
+      "render_height": 2560,
+      "render_resolution": "2K",
+      "codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "source_clips": [
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        },
+        {
+          "source_width": 2160,
+          "source_height": 3840,
+          "source_quality_tier": "2160p"
+        }
+      ],
+      "source_clips_native_2k_or_better": "5/5",
+      "upload_time_utc": "2026-10-22T00:24:03Z",
+      "analytics": {
+        "youtube_video_id": null,
+        "views": null,
+        "likes": null,
+        "comments": null,
+        "subscribers_gained": null,
+        "average_view_duration": null,
+        "average_percentage_viewed": null,
+        "performance_score": null,
+        "note": "Filled in later by analytics_ingest.py once the platform API has data for this video."
+      },
+      "recorded_at_utc": "2026-10-22T00:24:03Z"
     }
   },
   "template_stats": {
