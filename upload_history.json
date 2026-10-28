@@ -2332,6 +2332,19 @@
         "instagram": null
       },
       "upload_state": "partially_uploaded"
+    },
+    {
+      "hash": "b009686a40f420af096af3f913f803dffaa69d75596d40d73bd855b47c655c1a",
+      "title": "Surah Aali-Imran 3:42-43 | Quran",
+      "surah_num": 3,
+      "last_ayah": 43,
+      "timestamp": "2026-10-28T16:38:53Z",
+      "results": {
+        "youtube": "c4XVg7giECM",
+        "facebook": "1703987467905878",
+        "instagram": "17897444490420806"
+      },
+      "upload_state": "fully_uploaded"
     }
   ]
 }
